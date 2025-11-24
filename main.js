@@ -1,7 +1,9 @@
 const { app, BrowserWindow, ipcMain, dialog, screen, shell } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');// 增加 exec 用于解压
+const https = require('https'); // 用于下载
+const os = require('os'); // 用于判断系统
 const treeKill = require('tree-kill');
 const getPort = require('get-port');
 const puppeteer = require('puppeteer-extra');
@@ -42,8 +44,20 @@ function createWindow() {
 
     const win = new BrowserWindow({
         width: winW, height: winH, minWidth: 800, minHeight: 600,
-        title: "GeekEZ Browser", backgroundColor: '#1e1e2d',
-		icon: path.join(__dirname, 'resources/icon.ico'),
+        title: "GeekEZ Browser", 
+        backgroundColor: '#1e1e2d',
+        // 核心修改：启用自定义标题栏颜色 (仅 Windows 生效，Mac/Linux 忽略)
+		// 核心修改：指向根目录的 icon.png
+        // Windows 其实也能识别 png 作为窗口图标，比 ico 兼容性更好
+		icon: path.join(__dirname, 'icon.png'),
+        titleBarOverlay: {
+            color: '#1e1e2d', // 初始颜色 (Geek模式)
+            symbolColor: '#ffffff',
+            height: 35 // 稍微调高一点，方便点击
+        },
+        // 隐藏默认菜单栏，但保留窗口控制按钮
+        titleBarStyle: 'hidden', 
+        
         webPreferences: { 
             preload: path.join(__dirname, 'preload.js'), 
             contextIsolation: true, 
@@ -51,8 +65,11 @@ function createWindow() {
             spellcheck: false 
         }
     });
+    
+    // 移除原生菜单 (Windows/Linux)
     win.setMenuBarVisibility(false);
     win.loadFile('index.html');
+    return win; // 返回 win 对象以便后续使用
 }
 
 app.whenReady().then(() => {
@@ -401,6 +418,213 @@ ipcMain.handle('launch-profile', async (event, profileId) => {
         return switchMsg; 
     } catch (err) { console.error(err); throw err; }
 });
+
+// 1. 设置标题栏颜色
+ipcMain.handle('set-title-bar-color', (e, colors) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (win) {
+        // Windows 专用 API
+        if (process.platform === 'win32') {
+            win.setTitleBarOverlay({
+                color: colors.bg,
+                symbolColor: colors.symbol
+            });
+        }
+        // 通用背景色设置 (防止加载闪烁)
+        win.setBackgroundColor(colors.bg);
+    }
+});
+
+// 2. 检查 APP 更新
+ipcMain.handle('check-app-update', async () => {
+    const currentVer = app.getVersion();
+    try {
+        // 增加容错：如果 fetch 失败或解析失败，直接捕获
+        const data = await fetchJson('https://api.github.com/repos/EchoHS/GeekezBrowser/releases/latest');
+        
+        // 核心修复：检查 data 和 tag_name 是否存在
+        if (!data || !data.tag_name) {
+            console.warn("No release info found or API limit exceeded.");
+            return { update: false };
+        }
+
+        const remoteVer = data.tag_name.replace('v', ''); 
+        
+        if (compareVersions(remoteVer, currentVer) > 0) {
+            shell.openExternal(data.html_url);
+            return { update: true, remote: remoteVer };
+        }
+        return { update: false };
+    } catch (e) {
+        console.error("Check App Update Failed:", e.message); // 只打印消息，防止炸主进程
+        return { update: false, error: e.message };
+    }
+});
+
+// 3. 检查 Xray 更新
+ipcMain.handle('check-xray-update', async () => {
+    // 这里我们硬编码一个当前 Xray 版本，或者读取文件
+    // 简单起见，我们假设当前是 v1.8.4，去查最新版
+    // 更好的做法是运行 bin/xray -version 获取，但这里为了速度直接查 API
+    try {
+        const data = await fetchJson('https://api.github.com/repos/XTLS/Xray-core/releases/latest');
+        const remoteVer = data.tag_name; // v1.8.x
+        
+        // 获取当前 Xray 版本 (通过执行命令)
+        const currentVer = await getLocalXrayVersion();
+        
+        if (remoteVer !== currentVer) {
+            // 构造下载链接
+            let assetName = '';
+            const arch = os.arch();
+            const platform = os.platform();
+            if (platform === 'win32') assetName = `Xray-windows-${arch==='x64'?'64':'32'}.zip`;
+            else if (platform === 'darwin') assetName = `Xray-macos-${arch==='arm64'?'arm64-v8a':'64'}.zip`;
+            else assetName = `Xray-linux-${arch==='x64'?'64':'32'}.zip`;
+
+            // 使用加速镜像 (可选)
+            const downloadUrl = `https://gh-proxy.com/https://github.com/XTLS/Xray-core/releases/download/${remoteVer}/${assetName}`;
+            return { update: true, remote: remoteVer, downloadUrl };
+        }
+        return { update: false };
+    } catch (e) {
+        return { update: false };
+    }
+});
+
+// 4. 下载并更新 Xray
+// main.js - 修复 download-xray-update
+
+ipcMain.handle('download-xray-update', async (e, url) => {
+    const zipPath = path.join(path.dirname(BIN_PATH), 'update_xray.zip');
+    const destDir = path.dirname(BIN_PATH);
+    
+    try {
+        // 1. 下载文件
+        await downloadFile(url, zipPath);
+        
+        // 2. 核心修复：强制终止所有 Xray 进程
+        // 仅依赖 activeProcesses 可能会漏掉僵尸进程
+        if (process.platform === 'win32') {
+            try {
+                // 使用 taskkill 强制杀掉名为 xray.exe 的进程
+                await new Promise((resolve) => {
+                    exec('taskkill /F /IM xray.exe', () => resolve()); 
+                });
+            } catch(e) {}
+        } else {
+            try {
+                await new Promise((resolve) => {
+                    exec('pkill xray', () => resolve());
+                });
+            } catch(e) {}
+        }
+        
+        // 清空记录
+        activeProcesses = {};
+
+        // 3. 等待文件锁释放 (关键)
+        await new Promise(r => setTimeout(r, 1000));
+
+        // 4. 解压覆盖
+        await extractZip(zipPath, destDir);
+        
+        // 5. 清理压缩包
+        fs.unlinkSync(zipPath);
+        
+        // 6. 权限修复 (Linux/Mac)
+        if (process.platform !== 'win32') fs.chmodSync(BIN_PATH, '755');
+        
+        return true;
+    } catch (e) {
+        console.error("Xray Update Failed:", e);
+        // 如果失败，尝试删除临时文件
+        try { if(fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch(err){}
+        return false;
+    }
+});
+
+// --- 辅助函数 ---
+
+function fetchJson(url) {
+    return new Promise((resolve, reject) => {
+        const req = https.get(url, { headers: {'User-Agent': 'GeekEZ-Browser'} }, (res) => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => {
+                try { resolve(JSON.parse(data)); } catch(e) { reject(e); }
+            });
+        });
+        req.on('error', reject);
+    });
+}
+
+// main.js - 修复 getLocalXrayVersion
+
+function getLocalXrayVersion() {
+    return new Promise((resolve) => {
+        if (!fs.existsSync(BIN_PATH)) return resolve('v0.0.0');
+        
+        // 增加 try-catch 防止 spawn 异常
+        try {
+            const proc = spawn(BIN_PATH, ['-version']);
+            let output = '';
+            proc.stdout.on('data', d => output += d.toString());
+            
+            proc.on('close', () => {
+                // 修复正则：兼容 "Xray 1.8.4" 和 "Xray v1.8.4"
+                // 输出示例：Xray 1.8.4 (Xray, Penetrates Everything.) Custom ...
+                const match = output.match(/Xray\s+v?(\d+\.\d+\.\d+)/i);
+                const ver = match ? match[1] : 'v0.0.0';
+                // 统一格式为 vX.X.X
+                resolve(ver.startsWith('v') ? ver : `v${ver}`);
+            });
+            
+            proc.on('error', () => resolve('v0.0.0'));
+        } catch (e) {
+            resolve('v0.0.0');
+        }
+    });
+}
+
+function compareVersions(v1, v2) {
+    const p1 = v1.split('.').map(Number);
+    const p2 = v2.split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+        if ((p1[i] || 0) > (p2[i] || 0)) return 1;
+        if ((p1[i] || 0) < (p2[i] || 0)) return -1;
+    }
+    return 0;
+}
+
+function downloadFile(url, dest) {
+    return new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(dest);
+        https.get(url, (response) => {
+            if (response.statusCode === 302 || response.statusCode === 301) {
+                downloadFile(response.headers.location, dest).then(resolve).catch(reject);
+                return;
+            }
+            response.pipe(file);
+            file.on('finish', () => file.close(resolve));
+        }).on('error', (err) => { fs.unlink(dest, ()=>{}); reject(err); });
+    });
+}
+
+function extractZip(zipPath, destDir) {
+    return new Promise((resolve, reject) => {
+        if (os.platform() === 'win32') {
+            exec(`powershell -command "Expand-Archive -Path '${zipPath}' -DestinationPath '${destDir}' -Force"`, (err) => {
+                if (err) reject(err); else resolve();
+            });
+        } else {
+            exec(`unzip -o "${zipPath}" -d "${destDir}"`, (err) => {
+                if (err) reject(err); else resolve();
+            });
+        }
+    });
+}
+
 // --- Export Logic ---
 ipcMain.handle('export-data', async (e, type) => {
     const profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];

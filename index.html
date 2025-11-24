@@ -29,8 +29,23 @@
             padding: 20px; background: var(--bg-color); color: var(--text-primary); 
             margin: 0; overflow: hidden; 
             transition: background var(--transition-speed), color var(--transition-speed);
+            padding-top: 45px !important; 
+            -webkit-app-region: drag; 
         }
+		 .no-drag, button, input, textarea, select, .icon-btn, .profile-item, .modal-content, .lang-btn, .logo {
+			-webkit-app-region: no-drag !important;
+			cursor: default; /* 恢复鼠标样式 */
+		}
+		
+		/* 交互元素必须是指针 */
+		button, .icon-btn, .lang-btn, .quick-switch-select, .export-option, .tab-btn {
+			cursor: pointer;
+		}
         
+        button, input, textarea, select, .icon-btn, .profile-item, .modal-content, .lang-btn, .logo {
+            -webkit-app-region: no-drag;
+        }
+
         /* Splash Style */
         #splash {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
@@ -79,73 +94,41 @@
         button.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
         button.danger:hover { background: var(--danger); color: #fff; }
 
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-
-		.logo { 
-			display: flex; 
-			align-items: center; 
-			/* 关键：消除 Flex 元素之间的默认间距 */
-			gap: 0; 
-			/* 保持原来的倾斜和字体设置 */
-			font-family: 'Courier New', monospace; 
-			transform: skewX(-10deg); 
-			cursor: default; /* 防止鼠标变成选中文本样式 */
-			user-select: none; /* 禁止选中 */
-		}
-
-		/* 专门控制 Logo SVG 的样式 */
-		.logo-svg {
-			height: 32px; /* 根据你的字体大小调整，28px 通常比较合适 */
-			width: auto;  /* 保持比例 */
-			/* 关键：使用负边距向右拉近文字，消除空隙 */
-			margin-right: -4px; 
-			/* 微调垂直位置，保证 G 的底部和 eek 对齐 */
-			position: relative;
-			top: -2px; 
-		}
-
-		/* 专门控制剩余文字的样式 */
-		.logo-text {
-			font-size: 24px; 
-			font-weight: bold; 
-			color: var(--text-primary);
-			/* 稍微调整字间距，让 eek 看起来紧凑一点 */
-			letter-spacing: -1px;
-		}
-
-		.logo-text span { 
-			color: var(--accent); 
-			text-shadow: 0 0 5px var(--accent); 
-			/* EZ 和 eek 之间稍微分开一点点，增加层次感 */
-			margin-left: 1px; 
-		}
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; margin-top: 0; }
+        
+        .logo { 
+            display: flex; align-items: center; gap: 0; 
+            font-family: 'Courier New', monospace; transform: skewX(-10deg); 
+            cursor: default; user-select: none; 
+        }
+        .logo-svg { height: 28px; width: auto; margin-right: -4px; position: relative; top: -2px; }
+        .logo-text { font-size: 24px; font-weight: bold; color: var(--text-primary); letter-spacing: -1px; }
+        .logo-text span { color: var(--accent); text-shadow: 0 0 5px var(--accent); margin-left: 1px; }
         
         .top-actions { display: flex; gap: 10px; align-items: center; height: 24px; }
         .theme-select { height: 100%; padding: 0 8px; line-height: 22px; margin: 0; background: var(--bg-color); border: 1px solid var(--accent); color: var(--accent); font-size: 12px; border-radius: 4px; cursor: pointer; }
         .icon-btn { cursor: pointer; color: var(--text-secondary); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
         .icon-btn:hover { color: var(--accent); }
-        
+        .lang-btn { cursor: pointer; font-size: 12px; border: 1px solid var(--accent); color: var(--accent); padding: 0 6px; border-radius: 4px; height: 24px; line-height: 22px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; -webkit-app-region: no-drag; }
+
         .toolbar { background: var(--card-bg); padding: 10px 15px; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; border-left: 4px solid var(--accent); }
         .status-badge { font-size: 12px; border: 1px solid var(--accent); color: var(--accent); padding: 2px 8px; border-radius: 4px; }
 
-        /* Sub Toolbar: 分离布局 */
-        .sub-toolbar { 
-            display: flex; justify-content: space-between; align-items: center; 
-            margin-bottom: 15px; padding: 0 5px;
-        }
+        .sub-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 0 5px; }
         .sub-left { display: flex; gap: 10px; }
         .sub-right { display: flex; gap: 10px; align-items: center; }
-
         .search-box { background: var(--input-bg); border: 1px solid var(--border); color: var(--text-primary); padding: 4px 10px; border-radius: 15px; width: 220px; font-size: 12px; margin: 0; transition: width 0.3s; }
         .search-box:focus { border-color: var(--accent); outline: none; width: 260px; }
 
-        /* Layout - Full Width */
         .layout { display: flex; gap: 15px; height: calc(100vh - 200px); }
-        /* 移除 .sidebar */
         .main-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 5px; }
         
-        .main-list.grid-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); grid-auto-rows: min-content; align-content: start; gap: 10px; }
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 300px; color: var(--text-secondary); opacity: 0.6; text-align: center; grid-column: 1 / -1; }
+        .empty-state svg { width: 80px; height: 80px; margin-bottom: 20px; color: var(--accent); opacity: 0.5; }
+        .empty-state-text { font-size: 24px; font-weight: bold; letter-spacing: 1px; }
 
+        .main-list.grid-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); grid-auto-rows: min-content; align-content: start; gap: 10px; }
+        .card { background: var(--card-bg); padding: 15px; border-radius: 8px; border: 1px solid var(--border); }
         .profile-item { background: var(--card-bg); padding: 10px 15px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border); transition: 0.2s; position: relative; overflow: hidden; }
         .profile-item:hover { border-color: var(--accent); transform: translateX(2px); }
         .profile-info h4 { margin: 0 0 5px 0; font-size: 15px; color: var(--text-primary); }
@@ -162,92 +145,57 @@
         .main-list.grid-view .actions { width: 100%; justify-content: space-between; margin-top: 5px; }
         .main-list.grid-view .actions button { flex: 1; padding: 0 5px; font-size: 11px; }
 
-        /* Modal General - 核心修复: height auto & max-height */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; backdrop-filter: blur(4px); }
+        /* Modal Structure - 核心修复 */
+        .modal-overlay { 
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.8); z-index: 1000; backdrop-filter: blur(4px); 
+            justify-content: center; align-items: center; /* Flex 居中 */
+        }
         
         .modal-content { 
             background: var(--bg-color); 
-            width: 500px; 
-            height: auto; /* 允许内容自适应高度 */
-            max-height: 85vh; /* 限制最大高度 */
-            margin: 10vh auto; 
+            width: 500px; /* 默认宽度 */
+            height: auto; /* 自适应内容高度 */
+            max-height: 90vh; /* 防止溢出屏幕 */
+            margin: 0; /* 移除 margin，完全靠 Flex 居中 */
             padding: 20px; 
             border-radius: 8px; border: 1px solid var(--accent); 
             display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;
         }
         
-        /* Proxy Manager Modal Specific */
-        #proxyModal .modal-content, #helpModal .modal-content { 
-            width: 800px; 
-            height: 85vh; /* 这些弹窗需要大高度 */
-        }
-
+        /* 覆盖特定大窗口的高度 */
+        #proxyModal .modal-content, #helpModal .modal-content { width: 800px; height: 85vh; } 
+        #confirmModal .modal-content, #alertModal .modal-content { width: 350px; text-align: center; }
+        
         .modal-header { display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; color: var(--accent); padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
         .modal-body { flex: 1; overflow-y: auto; padding-right: 5px; min-height: 0; }
         .modal-footer { margin-top: 15px; text-align: right; flex-shrink: 0; border-top: 1px solid var(--border); padding-top: 10px; }
 
         /* Proxy List Styling */
         #preProxyList { flex: 1; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; padding: 5px; margin-bottom: 10px; min-height: 0; }
-        
-        .proxy-row { 
-            display: flex; align-items: center; 
-            padding: 0 10px; border-bottom: 1px solid var(--border); 
-            transition: 0.2s; height: 40px; box-sizing: border-box; 
-        }
+        .proxy-row { display: flex; align-items: center; padding: 0 10px; border-bottom: 1px solid var(--border); transition: 0.2s; height: 40px; box-sizing: border-box; }
         .proxy-row:hover { background: rgba(128,128,128,0.08); }
-        
         .proxy-left { display: flex; align-items: center; margin-right: 10px; flex-shrink: 0; }
         .proxy-mid { flex: 1; display: flex; align-items: center; min-width: 0; margin-right: 10px; height: 100%; }
-        
         .proxy-header { display: flex; align-items: center; width: 100%; }
-        
         .proxy-proto { font-size: 9px; padding: 0 5px; border-radius: 3px; background: rgba(128,128,128,0.2); color: var(--text-primary); font-weight: bold; flex-shrink: 0; margin-right: 8px; height: 18px; line-height: 18px; display: inline-block; }
         .proxy-remark { font-size: 13px; font-weight: bold; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; margin-right: 8px; display: flex; align-items: center; height: 100%; }
-        
-        .proxy-latency { 
-            font-size: 10px; font-weight: bold; padding: 0 8px; border-radius: 4px; flex-shrink: 0; min-width: 50px; text-align: center;
-            height: var(--row-height); box-sizing: border-box;
-            display: flex; align-items: center; justify-content: center; 
-            margin-left: 5px; line-height: 1; padding-top: 1px;
-        }
-        
-        /* Proxy URL removed, no need CSS */
-        
+        .proxy-latency { font-size: 10px; font-weight: bold; padding: 0 8px; border-radius: 4px; flex-shrink: 0; min-width: 50px; text-align: center; height: var(--row-height); box-sizing: border-box; display: flex; align-items: center; justify-content: center; margin-left: 5px; line-height: 1; padding-top: 1px; }
         .proxy-right { display: flex; gap: 8px; align-items: center; flex-shrink: 0; height: 100%; }
-        .proxy-right button { 
-            padding: 0 10px; font-size: 10px; min-width: 45px; margin: 0; 
-            height: var(--row-height); box-sizing: border-box;
-            display: flex; align-items: center; justify-content: center; line-height: 1;
-        }
+        .proxy-right button { padding: 0 10px; font-size: 10px; min-width: 45px; margin: 0; height: var(--row-height); box-sizing: border-box; display: flex; align-items: center; justify-content: center; line-height: 1; }
 
         #manualAddArea { background: rgba(0,0,0,0.05); padding: 10px; border-radius: 6px; flex-shrink: 0; }
         .tab-header { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 10px; overflow-x: auto; white-space: nowrap; flex-shrink: 0; }
         .tab-btn { padding: 8px 15px; cursor: pointer; font-size: 12px; font-weight: bold; color: var(--text-secondary); border-bottom: 2px solid transparent; transition: 0.2s; display: inline-block; }
         .tab-btn:hover { color: var(--text-primary); }
         .tab-btn.active { color: var(--accent); border-bottom: 2px solid var(--accent); background: rgba(255,255,255,0.05); }
-        
         .help-section { display: none; }
         .help-section.active { display: block; animation: fadeIn 0.3s; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-
         .export-option { padding: 15px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; transition: 0.2s; }
         .export-option:hover { background: rgba(128,128,128,0.1); border-color: var(--accent); }
         .export-title { font-weight: bold; font-size: 14px; }
         .export-desc { font-size: 11px; color: var(--text-secondary); }
-		/* 针对确认弹窗的特殊修正 */
-		#confirmModal .modal-content {
-			text-align: center; /* 强制内容居中 */
-			width: 350px; /* 稍微加宽一点 */
-			height: auto;
-			align-items: center; /* Flex 居中 */
-		}
-
-		/* 确保确认弹窗内的按钮居中 */
-		#confirmModal .modal-content div[style*="display: flex"] {
-			justify-content: center;
-			width: 100%;
-			margin-top: 15px;
-		}
 
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: var(--bg-color); }
@@ -259,34 +207,37 @@
     <div id="splash"><div class="glitch-wrapper"><div class="glitch-text" data-text="GeekEZ">GeekEZ</div></div></div>
 
     <div class="header">
-		<div class="logo">
-			<!-- SVG 图标 (作为字母 G) -->
-			<svg class="logo-svg" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
-			  <defs>
-				<linearGradient id="neon" x1="0%" y1="0%" x2="100%" y2="100%">
-				  <stop offset="0%" style="stop-color:#00e0ff;stop-opacity:1" />
-				  <stop offset="100%" style="stop-color:#2980b9;stop-opacity:1" />
-				</linearGradient>
-			  </defs>
-			  <!-- 主体 G -->
-			  <path d="M256 100 H 120 A 20 20 0 0 0 100 120 V 392 A 20 20 0 0 0 120 412 H 392 A 20 20 0 0 0 412 392 V 256 H 256 V 320 H 330 V 332 H 180 V 180 H 330 V 100" fill="url(#neon)" />
-			  <!-- 故障切割块 -->
-			  <rect x="360" y="80" width="60" height="40" fill="#ff0055" opacity="0.8" />
-			  <rect x="80" y="280" width="40" height="20" fill="#00e0ff" opacity="0.6" />
-			  <!-- 像素噪点 -->
-			  <rect x="400" y="400" width="30" height="30" fill="#00e0ff" />
-			  <rect x="80" y="80" width="20" height="20" fill="#ff0055" />
-			</svg>
-			<!-- 剩余的文字 -->
-			<div class="logo-text">eek<span>EZ</span></div>
-		</div>
+        <div class="logo">
+            <svg class="logo-svg" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="neon" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" style="stop-color:#00e0ff;stop-opacity:1" />
+                  <stop offset="100%" style="stop-color:#2980b9;stop-opacity:1" />
+                </linearGradient>
+              </defs>
+              <path d="M256 100 H 120 A 20 20 0 0 0 100 120 V 392 A 20 20 0 0 0 120 412 H 392 A 20 20 0 0 0 412 392 V 256 H 256 V 320 H 330 V 332 H 180 V 180 H 330 V 100" fill="url(#neon)" />
+              <rect x="360" y="80" width="60" height="40" fill="#ff0055" opacity="0.8" />
+              <rect x="80" y="280" width="40" height="20" fill="#00e0ff" opacity="0.6" />
+              <rect x="400" y="400" width="30" height="30" fill="#00e0ff" />
+              <rect x="80" y="80" width="20" height="20" fill="#ff0055" />
+            </svg>
+            <div class="logo-text">eek<span>EZ</span></div>
+        </div>
+
         <div class="top-actions">
             <select class="theme-select" onchange="setTheme(this.value)" id="themeSelect">
                 <option value="geek">Geek</option><option value="light">Light</option><option value="dark">Dark</option>
             </select>
             <div class="icon-btn" onclick="openGithub()" title="Github"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg></div>
             <div class="icon-btn" onclick="openHelp()" title="Help"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
-            <div style="cursor:pointer; font-size:12px; border:1px solid var(--accent); color:var(--accent); padding:2px 6px; border-radius:4px;" onclick="toggleLang()">CN/EN</div>
+            <div class="icon-btn" onclick="checkUpdates()" title="Check Updates" id="btnUpdate">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M16 12l-4-4-4 4"></path>
+                    <path d="M12 16V8"></path>
+                </svg>
+            </div>
+            <div class="lang-btn" onclick="toggleLang()">CN/EN</div>
         </div>
     </div>
 
@@ -305,7 +256,6 @@
         </div>
     </div>
 
-    <!-- New Sub-Toolbar Layout -->
     <div class="sub-toolbar">
         <div class="sub-left">
             <button onclick="openAddModal()" data-i18n="newProfile" style="background:var(--accent);color:var(--bg-color);">+ New Profile</button>
@@ -319,99 +269,19 @@
     </div>
 
     <div class="layout">
-        <!-- Sidebar removed -->
         <div class="main-list" id="profileList"></div>
     </div>
 
-    <!-- New Profile Modal (Replaces Sidebar) -->
-    <div id="addModal" class="modal-overlay">
-        <div class="modal-content">
-            <div class="modal-header"><span data-i18n="newProfile">New Profile</span><span style="cursor:pointer" onclick="closeAddModal()">✕</span></div>
-            <div class="modal-body">
-                <label data-i18n="profileName" style="font-size:11px; font-weight:bold; opacity:0.8;">Name</label>
-                <input type="text" id="addName" placeholder="Name" spellcheck="false" autocomplete="off">
-                <label data-i18n="proxyLink" style="font-size:11px; font-weight:bold; opacity:0.8;">Proxy</label>
-                <textarea id="addProxy" rows="4" placeholder="vmess://, ss://..." spellcheck="false" autocomplete="off"></textarea>
-                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 10px;" data-i18n="autoFingerprint">* Auto Fingerprint</div>
-            </div>
-            <div class="modal-footer">
-                <button class="outline" onclick="closeAddModal()" data-i18n="cancel">Cancel</button>
-                <button onclick="saveNewProfile()" data-i18n="generateBtn">Generate</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Proxy Manager Modal -->
-    <div id="proxyModal" class="modal-overlay">
-        <div class="modal-content">
-            <div class="modal-header">
-                <span data-i18n="manageChain">Manage Chain</span><span style="cursor:pointer" onclick="closeProxyManager()">✕</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-shrink:0;">
-                <select id="proxyMode" style="width:180px; margin-bottom:0;"></select>
-                <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;">
-                    <input type="checkbox" id="notifySwitch" style="width:auto; margin:0;"> <span data-i18n="notify">Notify</span>
-                </label>
-            </div>
-            <div class="tab-header" id="proxyGroupTabs"></div>
-            <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.1); padding:5px 10px; border-radius:4px; margin-bottom:10px; flex-shrink:0;">
-                <div id="currentGroupTitle" style="font-weight:bold; font-size:13px; color:var(--accent);">Manual</div>
-                <div style="display:flex; gap:10px;">
-                    <button class="outline" onclick="testCurrentGroup()" data-i18n="btnTestGroup" style="font-size:11px;">⚡ Test All</button>
-                    <button class="outline" id="btnEditSub" onclick="editCurrentSubscription()" style="font-size:11px; display:none;">✎ Edit Sub</button>
-                    <button class="outline" onclick="openSubEditModal(true)" data-i18n="btnImportSub" style="font-size:11px;">+ New Sub</button>
-                </div>
-            </div>
-            <div id="preProxyList"></div>
-            <div id="manualAddArea">
-                <div style="display:flex; gap:5px;">
-                    <input type="hidden" id="editProxyId">
-                    <input type="text" id="newProxyRemark" placeholder="Remark" style="width:25%; margin-bottom:0;" spellcheck="false">
-                    <input type="text" id="newProxyUrl" placeholder="vmess://, ss://..." style="flex:1; margin-bottom:0;" spellcheck="false">
-                    <button onclick="savePreProxy()" data-i18n="add" id="btnSaveProxy" style="width:70px; margin-bottom:0;">Add</button>
-                </div>
-                <div style="font-size:11px; color:var(--text-secondary); margin-top:5px; text-align:right;">
-                    <span style="cursor:pointer; color:var(--accent);" onclick="resetProxyInput()">[Clear Input]</span>
-                </div>
-            </div>
-            <div style="text-align:right; margin-top:10px; flex-shrink:0;"><button onclick="saveProxySettings()" data-i18n="done">Done</button></div>
-        </div>
-    </div>
-
-    <!-- Edit Modal -->
-    <div id="editModal" class="modal-overlay">
-        <div class="modal-content">
-            <div class="modal-header"><span data-i18n="editFingerprint">Edit</span><span style="cursor:pointer" onclick="closeEditModal()">✕</span></div>
-            <div class="modal-body">
-                <label data-i18n="profileName" style="font-size:11px; font-weight:bold; opacity:0.8;">Name</label>
-                <input type="text" id="editName">
-                <label data-i18n="proxyLink" style="font-size:11px; font-weight:bold; opacity:0.8;">Proxy</label>
-                <textarea id="editProxy" rows="4"></textarea> 
-                <div style="display:flex; gap:10px;">
-                    <div style="flex:1"><label data-i18n="preProxySetting" style="font-size:11px; font-weight:bold; opacity:0.8;">Pre-Proxy</label><select id="editPreProxyOverride"><option value="default">Default</option><option value="on">On</option><option value="off">Off</option></select></div>
-                    <div style="flex:1"><label data-i18n="screenRes" style="font-size:11px; font-weight:bold; opacity:0.8;">Res</label><div style="display:flex; gap:5px;"><input type="number" id="editResW"><input type="number" id="editResH"></div></div>
-                </div>
-                <label style="font-size:11px; font-weight:bold; opacity:0.8;">User Agent</label>
-                <textarea id="editUA" rows="3" style="font-family:monospace; font-size:11px;"></textarea>
-                <label style="font-size:11px; font-weight:bold; opacity:0.8;">WebGL</label>
-                <input type="text" id="editGpuVendor"><input type="text" id="editGpuRenderer">
-                <label style="font-size:11px; font-weight:bold; opacity:0.8;">Seed</label>
-                <input type="number" id="editSeed">
-            </div>
-            <div class="modal-footer">
-                <button class="outline" onclick="closeEditModal()" data-i18n="cancel">Cancel</button>
-                <button onclick="saveEditProfile()" data-i18n="save">Save</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Export / Sub Edit / Confirm / Alert / Help / Input Modals (Same as before) -->
-    <div id="exportModal" class="modal-overlay" style="z-index: 2200;"><div class="modal-content" style="width: 400px; height: auto;"><div class="modal-header"><span data-i18n="exportTitle">Export</span><span style="cursor:pointer" onclick="closeExportModal()">✕</span></div><div class="export-option" onclick="exportData('all')"><div><div class="export-title" data-i18n="expAll">All</div><div class="export-desc" data-i18n="expAllDesc">Full</div></div><span>📦</span></div><div class="export-option" onclick="exportData('proxies')"><div><div class="export-title" data-i18n="expProxies">Proxies</div><div class="export-desc" data-i18n="expProxiesDesc">Proxies</div></div><span>🔗</span></div><div class="export-option" onclick="exportData('profiles')"><div><div class="export-title" data-i18n="expProfiles">Profiles</div><div class="export-desc" data-i18n="expProfilesDesc">Profiles</div></div><span>👤</span></div></div></div>
-    <div id="subEditModal" class="modal-overlay" style="z-index: 1100;"><div class="modal-content" style="width: 450px; height: auto;"><div class="modal-header"><span>Sub</span><span style="cursor:pointer" onclick="closeSubEditModal()">✕</span></div><input type="hidden" id="subId"><label>Name</label><input type="text" id="subName" spellcheck="false"><label>URL</label><input type="text" id="subUrl" spellcheck="false"><label>Auto Update</label><select id="subInterval"><option value="0">Disabled</option><option value="24">24h</option><option value="72">72h</option><option value="custom">Custom</option></select><input type="number" id="subCustomInterval" placeholder="Hours" style="display:none;"><div style="text-align:right; margin-top:15px;"><button class="danger" onclick="deleteSubscription()" id="btnDelSub" style="float:left;">Delete</button><button onclick="saveSubscription()">Save</button></div></div></div>
-    <div id="confirmModal" class="modal-overlay" style="z-index: 2000;"><div class="modal-content" style="width: 300px; margin-top: 20vh; height: auto;"><div style="font-size: 40px; color: var(--danger);">⚠</div><p id="confirmMsg" style="margin: 10px 0 20px;">Msg</p><div style="display: flex; justify-content: center; gap: 15px;"><button class="outline" onclick="closeConfirm(false)">Cancel</button><button class="danger" onclick="closeConfirm(true)">Confirm</button></div></div></div>
-    <div id="alertModal" class="modal-overlay" style="z-index: 2001;"><div class="modal-content" style="width: 300px; margin-top: 20vh; height: auto;"><div style="font-size: 30px; color: var(--accent);">ℹ</div><p id="alertMsg" style="margin: 10px 0 20px;">Msg</p><button onclick="document.getElementById('alertModal').style.display='none'">OK</button></div></div>
-    <div id="helpModal" class="modal-overlay"><div class="modal-content" style="width: 700px; height: 80vh;"><div class="modal-header" style="border:none;"><span data-i18n="helpTitle">Help</span><span style="cursor:pointer" onclick="closeHelp()">✕</span></div><div class="tab-header"><div class="tab-btn active" onclick="switchHelpTab('manual')" data-i18n="tabManual">Manual</div><div class="tab-btn" onclick="switchHelpTab('about')" data-i18n="tabAbout">About</div></div><div style="flex:1; overflow-y:auto; padding-right:10px; color: var(--text-secondary);" id="helpContent"><div id="help-manual" class="help-section active"></div><div id="help-about" class="help-section"></div></div></div></div>
-    <div id="inputModal" class="modal-overlay" style="z-index: 2100;"><div class="modal-content" style="width: 400px; margin-top: 15vh; height: auto;"><div class="modal-header"><span id="inputModalTitle">Input</span><span style="cursor:pointer" onclick="closeInputModal()">✕</span></div><textarea id="inputModalValue" rows="5" spellcheck="false"></textarea><div style="text-align:right; margin-top:10px;"><button onclick="submitInputModal()" data-i18n="done">OK</button></div></div></div>
+    <!-- Modals -->
+    <div id="addModal" class="modal-overlay"><div class="modal-content"><div class="modal-header"><span data-i18n="newProfile">New Profile</span><span style="cursor:pointer" onclick="closeAddModal()">✕</span></div><div class="modal-body"><label data-i18n="profileName" style="font-size:11px; font-weight:bold; opacity:0.8;">Name</label><input type="text" id="addName" placeholder="Name" spellcheck="false" autocomplete="off"><label data-i18n="proxyLink" style="font-size:11px; font-weight:bold; opacity:0.8;">Proxy</label><textarea id="addProxy" rows="4" placeholder="vmess://, ss://..." spellcheck="false" autocomplete="off"></textarea><div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 10px;" data-i18n="autoFingerprint">* Auto Fingerprint</div></div><div class="modal-footer"><button class="outline" onclick="closeAddModal()" data-i18n="cancel">Cancel</button><button onclick="saveNewProfile()" data-i18n="generateBtn">Generate</button></div></div></div>
+    <div id="proxyModal" class="modal-overlay"><div class="modal-content"><div class="modal-header"><span data-i18n="manageChain">Manage Chain</span><span style="cursor:pointer" onclick="closeProxyManager()">✕</span></div><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-shrink:0;"><select id="proxyMode" style="width:180px; margin-bottom:0;"></select><label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;"><input type="checkbox" id="notifySwitch" style="width:auto; margin:0;"> <span data-i18n="notify">Notify</span></label></div><div class="tab-header" id="proxyGroupTabs"></div><div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.1); padding:5px 10px; border-radius:4px; margin-bottom:10px; flex-shrink:0;"><div id="currentGroupTitle" style="font-weight:bold; font-size:13px; color:var(--accent);">Manual</div><div style="display:flex; gap:10px;"><button class="outline" onclick="testCurrentGroup()" data-i18n="btnTestGroup" style="font-size:11px;">⚡ Test All</button><button class="outline" id="btnEditSub" onclick="editCurrentSubscription()" style="font-size:11px; display:none;">✎ Edit Sub</button><button class="outline" onclick="openSubEditModal(true)" data-i18n="btnImportSub" style="font-size:11px;">+ New Sub</button></div></div><div id="preProxyList"></div><div id="manualAddArea"><div style="display:flex; gap:5px;"><input type="hidden" id="editProxyId"><input type="text" id="newProxyRemark" placeholder="Remark" style="width:25%; margin-bottom:0;" spellcheck="false"><input type="text" id="newProxyUrl" placeholder="vmess://, ss://..." style="flex:1; margin-bottom:0;" spellcheck="false"><button onclick="savePreProxy()" data-i18n="add" id="btnSaveProxy" style="width:70px; margin-bottom:0;">Add</button></div><div style="font-size:11px; color:var(--text-secondary); margin-top:5px; text-align:right;"><span style="cursor:pointer; color:var(--accent);" onclick="resetProxyInput()">[Clear Input]</span></div></div><div style="text-align:right; margin-top:10px; flex-shrink:0;"><button onclick="saveProxySettings()" data-i18n="done">Done</button></div></div></div>
+    <div id="editModal" class="modal-overlay"><div class="modal-content"><div class="modal-header"><span data-i18n="editFingerprint">Edit</span><span style="cursor:pointer" onclick="closeEditModal()">✕</span></div><div class="modal-body"><label data-i18n="profileName" style="font-size:11px; font-weight:bold; opacity:0.8;">Name</label><input type="text" id="editName"><label data-i18n="proxyLink" style="font-size:11px; font-weight:bold; opacity:0.8;">Proxy</label><textarea id="editProxy" rows="4"></textarea><div style="display:flex; gap:10px;"><div style="flex:1"><label data-i18n="preProxySetting" style="font-size:11px; font-weight:bold; opacity:0.8;">Pre-Proxy</label><select id="editPreProxyOverride"><option value="default">Default</option><option value="on">On</option><option value="off">Off</option></select></div><div style="flex:1"><label data-i18n="screenRes" style="font-size:11px; font-weight:bold; opacity:0.8;">Res</label><div style="display:flex; gap:5px;"><input type="number" id="editResW"><input type="number" id="editResH"></div></div></div><label>User Agent</label><textarea id="editUA" rows="3" style="font-family:monospace; font-size:11px;"></textarea><label>WebGL</label><input type="text" id="editGpuVendor"><input type="text" id="editGpuRenderer"><label>Seed</label><input type="number" id="editSeed"></div><div class="modal-footer"><button class="outline" onclick="closeEditModal()" data-i18n="cancel">Cancel</button><button onclick="saveEditProfile()" data-i18n="save">Save</button></div></div></div>
+    <div id="exportModal" class="modal-overlay" style="z-index: 2200;"><div class="modal-content"><div class="modal-header"><span data-i18n="exportTitle">Export</span><span style="cursor:pointer" onclick="closeExportModal()">✕</span></div><div class="export-option" onclick="exportData('all')"><div><div class="export-title" data-i18n="expAll">All</div><div class="export-desc" data-i18n="expAllDesc">Full</div></div><span>📦</span></div><div class="export-option" onclick="exportData('proxies')"><div><div class="export-title" data-i18n="expProxies">Proxies</div><div class="export-desc" data-i18n="expProxiesDesc">Proxies</div></div><span>🔗</span></div><div class="export-option" onclick="exportData('profiles')"><div><div class="export-title" data-i18n="expProfiles">Profiles</div><div class="export-desc" data-i18n="expProfilesDesc">Profiles</div></div><span>👤</span></div></div></div>
+    <div id="subEditModal" class="modal-overlay" style="z-index: 1100;"><div class="modal-content"><div class="modal-header"><span>Sub</span><span style="cursor:pointer" onclick="closeSubEditModal()">✕</span></div><input type="hidden" id="subId"><label>Name</label><input type="text" id="subName" spellcheck="false"><label>URL</label><input type="text" id="subUrl" spellcheck="false"><label>Auto Update</label><select id="subInterval"><option value="0">Disabled</option><option value="24">24h</option><option value="72">72h</option><option value="custom">Custom</option></select><input type="number" id="subCustomInterval" placeholder="Hours" style="display:none;"><div style="text-align:right; margin-top:15px;"><button class="danger" onclick="deleteSubscription()" id="btnDelSub" style="float:left;">Delete</button><button onclick="saveSubscription()">Save</button></div></div></div>
+    <div id="confirmModal" class="modal-overlay" style="z-index: 2000;"><div class="modal-content"><div class="modal-header" style="justify-content: center; border: none;"><span style="color: var(--danger); font-size: 40px;">⚠</span></div><p id="confirmMsg" style="margin: 10px 0 20px;">Msg</p><div style="display: flex; justify-content: center; gap: 15px;"><button class="outline" onclick="closeConfirm(false)">Cancel</button><button class="danger" onclick="closeConfirm(true)">Confirm</button></div></div></div>
+    <div id="alertModal" class="modal-overlay" style="z-index: 2001;"><div class="modal-content"><div class="modal-header" style="justify-content: center; border: none;"><span style="color: var(--accent); font-size: 30px;">ℹ</span></div><p id="alertMsg" style="margin: 10px 0 20px;">Msg</p><button onclick="document.getElementById('alertModal').style.display='none'">OK</button></div></div>
+    <div id="helpModal" class="modal-overlay"><div class="modal-content"><div class="modal-header" style="border:none;"><span data-i18n="helpTitle">Help</span><span style="cursor:pointer" onclick="closeHelp()">✕</span></div><div class="tab-header"><div class="tab-btn active" onclick="switchHelpTab('manual')" data-i18n="tabManual">Manual</div><div class="tab-btn" onclick="switchHelpTab('about')" data-i18n="tabAbout">About</div></div><div style="flex:1; overflow-y:auto; padding-right:10px; color: var(--text-secondary);" id="helpContent"><div id="help-manual" class="help-section active"></div><div id="help-about" class="help-section"></div></div></div></div>
+    <div id="inputModal" class="modal-overlay" style="z-index: 2100;"><div class="modal-content"><div class="modal-header"><span id="inputModalTitle">Input</span><span style="cursor:pointer" onclick="closeInputModal()">✕</span></div><textarea id="inputModalValue" rows="5" spellcheck="false"></textarea><div style="text-align:right; margin-top:10px;"><button onclick="submitInputModal()" data-i18n="done">OK</button></div></div></div>
 
     <script src="renderer.js"></script>
 </body>

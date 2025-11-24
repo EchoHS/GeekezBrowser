@@ -66,7 +66,20 @@ const i18n = {
         helpTitle: "GeekEZ Manual",
         tabManual: "User Manual",
         tabAbout: "About & Safety",
-        autoFingerprint: "* Fingerprints generated automatically"
+        autoFingerprint: "* Fingerprints generated automatically",
+        checkingUpdate: "Checking for updates...",
+        appUpdateFound: "New App version found!",
+        xrayUpdateFound: "New Xray core found! Downloading...",
+        noUpdate: "You are up to date.",
+        updateError: "Update check failed.",
+        updateDownloaded: "Update downloaded. Please restart.",
+        emptyStateMsg: "Click '+ New Profile' to start",
+        // --- 新增汉化 ---
+        confirmDelSub: "Are you sure to delete this subscription?",
+        msgSubUpdated: "Updated:",
+        msgImported: "Imported",
+        msgNodes: "nodes.",
+        msgUpdateFailed: "Update Failed:"
     },
     cn: {
         enablePreProxy: "开启前置代理",
@@ -135,11 +148,24 @@ const i18n = {
         helpTitle: "使用帮助",
         tabManual: "操作说明",
         tabAbout: "关于 & 适用性",
-        autoFingerprint: "* 指纹参数将自动随机生成"
+        autoFingerprint: "* 指纹参数将自动随机生成",
+        checkingUpdate: "正在检查更新...",
+        appUpdateFound: "发现软件新版本！正在打开下载页...",
+        xrayUpdateFound: "发现 Xray 内核更新！正在后台下载...",
+        noUpdate: "当前已是最新版本。",
+        updateError: "检查更新失败。",
+        updateDownloaded: "内核更新完成，重启软件生效。",
+        emptyStateMsg: "点击 '+ 新建环境' 开始使用",
+        // --- 新增汉化 ---
+        confirmDelSub: "确定要删除该订阅及其所有节点吗？",
+        msgSubUpdated: "订阅更新成功：",
+        msgImported: "成功导入",
+        msgNodes: "个节点。",
+        msgUpdateFailed: "更新失败："
     }
 };
 
-let curLang = 'cn';
+let curLang = localStorage.getItem('geekez_lang') || 'cn';
 let globalSettings = { preProxies: [], subscriptions: [], mode: 'single', enablePreProxy: false };
 let currentEditId = null;
 let confirmCallback = null;
@@ -148,7 +174,6 @@ let inputCallback = null;
 let searchText = '';
 let viewMode = localStorage.getItem('geekez_view') || 'list';
 
-// --- Helpers ---
 function decodeBase64Content(str) {
     try {
         str = str.replace(/-/g, '+').replace(/_/g, '/');
@@ -183,7 +208,7 @@ function renderHelpContent() {
          <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">3. 前置代理</h4><p style="font-size:14px;">可选功能。用于隐藏本机IP或链路加速。</p></div>`;
 
     const aboutHTML = curLang === 'en' ?
-        `<div style="text-align:center;margin-bottom:20px;"><div style="font-size:24px;font-weight:bold;color:var(--text-primary);">Geek<span style="color:var(--accent);">EZ</span></div><div style="font-size:12px;opacity:0.6;">v1.3.0 (E-Commerce)</div></div>
+        `<div style="text-align:center;margin-bottom:20px;"><div style="font-size:24px;font-weight:bold;color:var(--text-primary);">Geek<span style="color:var(--accent);">EZ</span></div><div style="font-size:12px;opacity:0.6;">v1.0.0</div></div>
          <h4 style="border-bottom:1px solid var(--border);padding-bottom:5px;color:var(--text-primary);">Technology</h4><p style="font-size:13px;margin-bottom:20px;">Electron + Puppeteer. Native Code Spoofing & Noise Injection.</p>
          <h4 style="border-bottom:1px solid var(--border);padding-bottom:5px;color:var(--text-primary);">Platform Analysis</h4>
          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px;">
@@ -191,10 +216,10 @@ function renderHelpContent() {
             <div style="background:rgba(0,0,0,0.15);padding:10px;border-radius:6px;"><div style="color:#27ae60;font-weight:bold;">TikTok</div><div style="font-size:11px;margin-top:5px;">Safe. Needs Resi IP.</div></div>
             <div style="background:rgba(0,0,0,0.15);padding:10px;border-radius:6px;"><div style="color:#2980b9;font-weight:bold;">Facebook</div><div style="font-size:11px;margin-top:5px;">Safe. Avoid Botting.</div></div>
             <div style="background:rgba(0,0,0,0.15);padding:10px;border-radius:6px;"><div style="color:#e67e22;font-weight:bold;">Shopee</div><div style="font-size:11px;margin-top:5px;">Safe. Stable device ID.</div></div>
-            <div style="background:rgba(0,0,0,0.15);padding:10px;border-radius:6px;"><div style="color:#bf0000;font-weight:bold;">Rakuten</div><div style="font-size:11px;margin-top:5px;">Safe. Relies on local IP.</div></div>
+            <div style="background:rgba(0,0,0,0.15);padding:10px;border-radius:6px;"><div style="color:#bf0000;font-weight:bold;">Rakuten</div><div style="font-size:11px;margin-top:5px;">Strict IP check.</div></div>
             <div style="background:rgba(0,0,0,0.15);padding:10px;border-radius:6px;"><div style="color:#f1c40f;font-weight:bold;">Mercado</div><div style="font-size:11px;margin-top:5px;">Safe. Similar to Amazon.</div></div>
          </div>` :
-        `<div style="text-align:center;margin-bottom:20px;"><div style="font-size:24px;font-weight:bold;color:var(--text-primary);">Geek<span style="color:var(--accent);">EZ</span></div><div style="font-size:12px;opacity:0.6;">v1.3.0 (电商版)</div></div>
+        `<div style="text-align:center;margin-bottom:20px;"><div style="font-size:24px;font-weight:bold;color:var(--text-primary);">Geek<span style="color:var(--accent);">EZ</span></div><div style="font-size:12px;opacity:0.6;">v1.0.0</div></div>
          <h4 style="border-bottom:1px solid var(--border);padding-bottom:5px;color:var(--text-primary);">技术内核</h4><p style="font-size:13px;margin-bottom:20px;">Native Code 伪装 + 多媒体噪音注入，有效对抗指纹。</p>
          <h4 style="border-bottom:1px solid var(--border);padding-bottom:5px;color:var(--text-primary);">平台适用性</h4>
          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px;">
@@ -221,22 +246,36 @@ function applyLang() {
     updateToolbar(); loadProfiles(); renderGroupTabs();
 }
 
-function toggleLang() { curLang = curLang === 'cn' ? 'en' : 'cn'; applyLang(); }
-function setTheme(themeName) { document.body.setAttribute('data-theme', themeName); localStorage.setItem('geekez_theme', themeName); }
+function toggleLang() { 
+    curLang = curLang === 'cn' ? 'en' : 'cn'; 
+    localStorage.setItem('geekez_lang', curLang);
+    applyLang(); 
+}
 
-function showAlert(msg) { document.getElementById('alertMsg').innerText = msg; document.getElementById('alertModal').style.display = 'block'; }
-function showConfirm(msg, callback) { document.getElementById('confirmMsg').innerText = msg; document.getElementById('confirmModal').style.display = 'block'; confirmCallback = callback; }
+function setTheme(themeName) {
+    document.body.setAttribute('data-theme', themeName);
+    localStorage.setItem('geekez_theme', themeName);
+    const themeColors = {
+        'geek':  { bg: '#1e1e2d', symbol: '#ffffff' },
+        'light': { bg: '#f0f2f5', symbol: '#000000' },
+        'dark':  { bg: '#121212', symbol: '#ffffff' }
+    };
+    const colors = themeColors[themeName] || themeColors['geek'];
+    window.electronAPI.invoke('set-title-bar-color', colors);
+}
+
+function showAlert(msg) { document.getElementById('alertMsg').innerText = msg; document.getElementById('alertModal').style.display = 'flex'; }
+function showConfirm(msg, callback) { document.getElementById('confirmMsg').innerText = msg; document.getElementById('confirmModal').style.display = 'flex'; confirmCallback = callback; }
 function closeConfirm(result) {
     document.getElementById('confirmModal').style.display = 'none';
     if (result && confirmCallback) confirmCallback();
     confirmCallback = null;
 }
 
-// Input Modal
 function showInput(title, callback) {
     document.getElementById('inputModalTitle').innerText = title;
     document.getElementById('inputModalValue').value = '';
-    document.getElementById('inputModal').style.display = 'block';
+    document.getElementById('inputModal').style.display = 'flex';
     document.getElementById('inputModalValue').focus();
     inputCallback = callback;
 }
@@ -265,7 +304,7 @@ async function init() {
     });
     
     checkSubscriptionUpdates();
-    updateToolbar(); loadProfiles(); applyLang();
+    applyLang();
 }
 
 async function checkSubscriptionUpdates() {
@@ -280,6 +319,27 @@ async function checkSubscriptionUpdates() {
         }
     }
     if(updated) await window.electronAPI.saveSettings(globalSettings);
+}
+
+async function checkUpdates() {
+    const btn = document.getElementById('btnUpdate');
+    btn.style.transition = 'transform 1s';
+    btn.style.transform = 'rotate(360deg)';
+    showAlert(t('checkingUpdate'));
+    try {
+        const appRes = await window.electronAPI.invoke('check-app-update');
+        if (appRes.update) { showAlert(`${t('appUpdateFound')} (v${appRes.remote})`); return; }
+        const xrayRes = await window.electronAPI.invoke('check-xray-update');
+        if (xrayRes.update) {
+            showAlert(`${t('xrayUpdateFound')} (v${xrayRes.remote})`);
+            const success = await window.electronAPI.invoke('download-xray-update', xrayRes.downloadUrl);
+            if(success) showAlert(t('updateDownloaded'));
+            else showAlert(t('updateError'));
+            return;
+        }
+        showAlert(t('noUpdate'));
+    } catch (e) { showAlert(t('updateError') + " " + e.message); } 
+    finally { setTimeout(() => { btn.style.transform = 'none'; }, 1000); }
 }
 
 function openGithub() { window.electronAPI.invoke('open-url', 'https://github.com/EchoHS/GeekezBrowser'); } 
@@ -312,20 +372,27 @@ async function loadProfiles() {
         listEl.innerHTML = '';
         const filtered = profiles.filter(p => p.name.toLowerCase().includes(searchText) || p.proxyStr.toLowerCase().includes(searchText));
 
+        if (filtered.length === 0) {
+            const isSearch = searchText.length > 0;
+            const msg = isSearch ? "No Search Results" : t('emptyStateMsg');
+            listEl.innerHTML = `<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg><div class="empty-state-text">${msg}</div></div>`;
+            return;
+        }
+
         filtered.forEach(p => {
             const fp = p.fingerprint || {};
             const screen = fp.screen || { width:0, height:0 };
             const override = p.preProxyOverride || 'default';
             const isRunning = runningIds.includes(p.id);
             const el = document.createElement('div');
-            el.className = 'profile-item';
+            el.className = 'profile-item no-drag';
             el.innerHTML = `
                 <div class="profile-info">
                     <div style="display:flex; align-items:center;"><h4>${p.name}</h4><span id="status-${p.id}" class="running-badge ${isRunning ? 'active' : ''}">${t('runningStatus')}</span></div>
                     <div class="profile-meta">
                         <span class="tag">${p.proxyStr.split('://')[0].toUpperCase() || 'N/A'}</span><span class="tag">${screen.width}x${screen.height}</span>
                         <span class="tag" style="border:1px solid var(--accent);">
-                            <select class="quick-switch-select" onchange="quickUpdatePreProxy('${p.id}', this.value)">
+                            <select class="quick-switch-select no-drag" onchange="quickUpdatePreProxy('${p.id}', this.value)">
                                 <option value="default" ${override==='default'?'selected':''}>${t('qsDefault')}</option>
                                 <option value="on" ${override==='on'?'selected':''}>${t('qsOn')}</option>
                                 <option value="off" ${override==='off'?'selected':''}>${t('qsOff')}</option>
@@ -333,7 +400,7 @@ async function loadProfiles() {
                         </span>
                     </div>
                 </div>
-                <div class="actions"><button onclick="launch('${p.id}')">${t('launch')}</button><button class="outline" onclick="openEditModal('${p.id}')">${t('edit')}</button><button class="danger" onclick="remove('${p.id}')">${t('delete')}</button></div>
+                <div class="actions"><button onclick="launch('${p.id}')" class="no-drag">${t('launch')}</button><button class="outline no-drag" onclick="openEditModal('${p.id}')">${t('edit')}</button><button class="danger no-drag" onclick="remove('${p.id}')">${t('delete')}</button></div>
             `;
             listEl.appendChild(el);
         });
@@ -346,11 +413,10 @@ async function quickUpdatePreProxy(id, val) {
     if(p) { p.preProxyOverride = val; await window.electronAPI.updateProfile(p); }
 }
 
-// New: Open Add Modal
 function openAddModal() {
     document.getElementById('addName').value = '';
     document.getElementById('addProxy').value = '';
-    document.getElementById('addModal').style.display = 'block';
+    document.getElementById('addModal').style.display = 'flex';
 }
 function closeAddModal() { document.getElementById('addModal').style.display = 'none'; }
 
@@ -359,10 +425,8 @@ async function saveNewProfile() {
     const proxyStr = document.getElementById('addProxy').value.trim();
     if (!name && proxyStr) { const autoName = getProxyRemark(proxyStr); if (autoName) name = autoName; }
     if(!name || !proxyStr) return showAlert(t('inputReq'));
-    
     await window.electronAPI.saveProfile({ name, proxyStr });
-    closeAddModal();
-    await loadProfiles();
+    closeAddModal(); await loadProfiles();
 }
 
 async function launch(id) {
@@ -393,7 +457,7 @@ async function openEditModal(id) {
     document.getElementById('editGpuVendor').value = fp.webgl?.vendor || '';
     document.getElementById('editGpuRenderer').value = fp.webgl?.renderer || '';
     document.getElementById('editSeed').value = fp.noiseSeed || 0;
-    document.getElementById('editModal').style.display = 'block';
+    document.getElementById('editModal').style.display = 'flex';
 }
 function closeEditModal() { document.getElementById('editModal').style.display = 'none'; currentEditId = null; }
 async function saveEditProfile() {
@@ -419,7 +483,7 @@ async function openProxyManager() {
     globalSettings = await window.electronAPI.getSettings();
     if(!globalSettings.subscriptions) globalSettings.subscriptions = [];
     renderGroupTabs();
-    document.getElementById('proxyModal').style.display = 'flex'; // Must use flex for new layout
+    document.getElementById('proxyModal').style.display = 'flex';
 }
 function closeProxyManager() { document.getElementById('proxyModal').style.display = 'none'; }
 
@@ -428,13 +492,13 @@ function renderGroupTabs() {
     if(!container) return;
     container.innerHTML = '';
     const manualBtn = document.createElement('div');
-    manualBtn.className = `tab-btn ${currentProxyGroup === 'manual' ? 'active' : ''}`;
+    manualBtn.className = `tab-btn no-drag ${currentProxyGroup === 'manual' ? 'active' : ''}`;
     manualBtn.innerText = t('groupManual');
     manualBtn.onclick = () => switchProxyGroup('manual');
     container.appendChild(manualBtn);
     globalSettings.subscriptions.forEach(sub => {
         const btn = document.createElement('div');
-        btn.className = `tab-btn ${currentProxyGroup === sub.id ? 'active' : ''}`;
+        btn.className = `tab-btn no-drag ${currentProxyGroup === sub.id ? 'active' : ''}`;
         btn.innerText = sub.name || 'Sub';
         btn.onclick = () => switchProxyGroup(sub.id);
         container.appendChild(btn);
@@ -444,7 +508,6 @@ function renderGroupTabs() {
 
 function switchProxyGroup(gid) { currentProxyGroup = gid; renderGroupTabs(); }
 
-// 核心修复：renderProxyNodes 移除 URL 展示
 function renderProxyNodes() {
     const modeSel = document.getElementById('proxyMode');
     if(modeSel.options.length === 0) modeSel.innerHTML = `<option value="single">${t('modeSingle')}</option><option value="balance">${t('modeBalance')}</option><option value="failover">${t('modeFailover')}</option>`;
@@ -475,14 +538,14 @@ function renderProxyNodes() {
 
     list.forEach(p => {
         const div = document.createElement('div');
-        div.className = 'proxy-row';
+        div.className = 'proxy-row no-drag';
         const isSel = globalSettings.mode === 'single' && globalSettings.selectedId === p.id;
         if(isSel) div.style.background = "rgba(0,224,255,0.08)";
 
         const inputType = globalSettings.mode === 'single' ? 'radio' : 'checkbox';
         const checked = globalSettings.mode === 'single' ? isSel : (p.enable !== false);
         const onchange = globalSettings.mode === 'single' ? `selP('${p.id}')` : `togP('${p.id}')`;
-        const inputHtml = `<input type="${inputType}" name="ps" ${checked?'checked':''} onchange="${onchange}" style="cursor:pointer; margin:0;">`;
+        const inputHtml = `<input type="${inputType}" name="ps" ${checked?'checked':''} onchange="${onchange}" style="cursor:pointer; margin:0;" class="no-drag">`;
         
         let latHtml = '';
         if(p.latency !== undefined) {
@@ -499,16 +562,15 @@ function renderProxyNodes() {
         let displayRemark = p.remark;
         if (!displayRemark || displayRemark.trim() === '') displayRemark = 'Node';
 
-        // REMOVED .proxy-url
         div.innerHTML = `
             <div class="proxy-left">${inputHtml}</div>
             <div class="proxy-mid">
                 <div class="proxy-header"><span class="proxy-proto">${proto}</span><span class="proxy-remark" title="${displayRemark}">${displayRemark}</span>${latHtml}</div>
             </div>
             <div class="proxy-right">
-                <button class="outline" onclick="testSingleProxy('${p.id}')">${t('btnTest')}</button>
-                ${isManual ? `<button class="outline" onclick="editPreProxy('${p.id}')">${t('btnEdit')}</button>` : ''}
-                <button class="danger" onclick="delP('${p.id}')">✕</button>
+                <button class="outline no-drag" onclick="testSingleProxy('${p.id}')">${t('btnTest')}</button>
+                ${isManual ? `<button class="outline no-drag" onclick="editPreProxy('${p.id}')">${t('btnEdit')}</button>` : ''}
+                <button class="danger no-drag" onclick="delP('${p.id}')">✕</button>
             </div>
         `;
         listEl.appendChild(div);
@@ -569,7 +631,7 @@ function openSubEditModal(isNew) {
         document.getElementById('subInterval').value = '24';
         document.getElementById('subCustomInterval').style.display = 'none';
     }
-    modal.style.display = 'block';
+    modal.style.display = 'flex';
     document.getElementById('subInterval').onchange = function() { document.getElementById('subCustomInterval').style.display = this.value === 'custom' ? 'block' : 'none'; }
 }
 
@@ -615,7 +677,8 @@ async function saveSubscription() {
 async function deleteSubscription() {
     const id = document.getElementById('subId').value;
     if(!id) return;
-    showConfirm("Delete subscription?", async () => {
+    // 修复：添加汉化
+    showConfirm(t('confirmDelSub'), async () => {
         globalSettings.subscriptions = globalSettings.subscriptions.filter(s => s.id !== id);
         globalSettings.preProxies = globalSettings.preProxies.filter(p => p.groupId !== id);
         currentProxyGroup = 'manual';
@@ -641,8 +704,12 @@ async function updateSubscriptionNodes(sub) {
             }
         });
         sub.lastUpdated = Date.now();
-        showAlert(`Updated ${sub.name}: ${count} nodes.`);
-    } catch(e) { showAlert(`Update Failed: ${e.message}`); }
+        // 修复：添加汉化
+        showAlert(`${t('msgSubUpdated')} ${sub.name} (${count} ${t('msgNodes')})`);
+    } catch(e) { 
+        // 修复：添加汉化
+        showAlert(`${t('msgUpdateFailed')} ${e.message}`); 
+    }
 }
 
 async function testSingleProxy(id) {
@@ -709,7 +776,7 @@ function updateToolbar() {
 }
 
 // Export Logic
-function openExportModal() { document.getElementById('exportModal').style.display = 'block'; }
+function openExportModal() { document.getElementById('exportModal').style.display = 'flex'; } // flex
 function closeExportModal() { document.getElementById('exportModal').style.display = 'none'; }
 async function exportData(type) {
     closeExportModal();
@@ -733,6 +800,36 @@ async function importData() {
     } catch(e) { showAlert("Import Failed: " + e.message); }
 }
 
+function openImportSub() { showInput(t('importSubTitle'), importSubscription); }
+async function importSubscription(url) {
+    if(!url) return;
+    try {
+        const content = await window.electronAPI.invoke('fetch-url', url);
+        if(!content) return showAlert(t('subErr'));
+        let decoded = content;
+        try { if (!content.includes('://')) decoded = decodeBase64Content(content); } catch(e){}
+        const lines = decoded.split(/[\r\n]+/);
+        let count = 0;
+        if (!globalSettings.preProxies) globalSettings.preProxies = [];
+        const groupId = `group-${Date.now()}`;
+        const groupName = `Sub ${new Date().toLocaleTimeString()}`;
+        lines.forEach(line => {
+            line = line.trim();
+            if (line && line.includes('://')) {
+                const remark = getProxyRemark(line) || `Node ${count + 1}`;
+                function uuidv4() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {const r=Math.random()*16|0,v=c=='x'?r:(r&0x3|0x8);return v.toString(16);}); }
+                globalSettings.preProxies.push({ 
+                    id: uuidv4(), remark, url: line, enable: true, groupId, groupName
+                });
+                count++;
+            }
+        });
+        renderProxyNodes(); await window.electronAPI.saveSettings(globalSettings);
+        // 修复：添加汉化
+        showAlert(`${t('msgImported')} ${count} ${t('msgNodes')}`);
+    } catch (e) { showAlert(t('subErr') + " " + e); }
+}
+
 function switchHelpTab(tabName) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     const idx = tabName === 'manual' ? 0 : 1;
@@ -741,7 +838,7 @@ function switchHelpTab(tabName) {
     document.querySelectorAll('.help-section').forEach(el => el.classList.remove('active'));
     document.getElementById(`help-${tabName}`).classList.add('active');
 }
-function openHelp() { switchHelpTab('manual'); document.getElementById('helpModal').style.display = 'block'; }
+function openHelp() { switchHelpTab('manual'); document.getElementById('helpModal').style.display = 'flex'; } // flex
 function closeHelp() { document.getElementById('helpModal').style.display = 'none'; }
 
 init();

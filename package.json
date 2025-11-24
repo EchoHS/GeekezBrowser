@@ -1,8 +1,9 @@
 {
   "name": "geekez-browser",
-  "version": "1.3.0",
+  "version": "1.0.0",
   "description": "Stealthy Anti-Detect Browser for E-Commerce",
   "main": "main.js",
+  "author": "EchoHS",
   "scripts": {
     "start": "electron .",
     "postinstall": "node setup.js",
@@ -22,7 +23,8 @@
       "!*.map",
       "!package-lock.json",
       "!dist",
-      "!_Trash_Bin"
+      "!_Trash_Bin",
+      "!release"
     ],
     "extraResources": [
       {
@@ -42,11 +44,18 @@
       "icon": "icon.icns"
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GeekEZ Browser"
     }
   },
   "dependencies": {
-    "electron": "^39.2.3",
     "fs-extra": "^11.3.2",
     "get-port": "^5.1.1",
     "js-base64": "^3.7.8",
