@@ -1,6 +1,4 @@
 const os = require('os');
-
-// 必须与本地 Puppeteer 下载的 Chrome 版本完全一致 (129)
 const CHROME_VERSION_FULL = '129.0.6668.58'; 
 const CHROME_MAJOR = '129';
 
@@ -138,7 +136,7 @@ function getInjectScript(fp) {
                 
                 // 2.3 Hook Date.prototype.toString 等方法
                 // 解决 "Time From Javascript" 显示中国时间的问题
-                // 我们将 Date.toString 代理到 Intl 的格式化结果上
+                // 将 Date.toString 代理到 Intl 的格式化结果上
                 const originalToString = Date.prototype.toString;
                 
                 // 自定义格式化函数，模拟原生 toString 格式: "Wed Nov 26 2025 01:00:11 GMT-0800 (Pacific Standard Time)"

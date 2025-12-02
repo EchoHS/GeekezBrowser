@@ -74,7 +74,6 @@
         updateError: "Update check failed.",
         updateDownloaded: "Update downloaded. Please restart.",
         emptyStateMsg: "Click '+ New Profile' to start",
-        // --- 新增汉化 ---
         confirmDelSub: "Are you sure to delete this subscription?",
         msgSubUpdated: "Updated:",
         msgImported: "Imported",
@@ -171,7 +170,6 @@
         updateError: "检查更新失败。",
         updateDownloaded: "内核更新完成，重启软件生效。",
         emptyStateMsg: "点击 '+ 新建环境' 开始使用",
-        // --- 新增汉化 ---
         confirmDelSub: "确定要删除该订阅及其所有节点吗？",
         msgSubUpdated: "订阅更新成功：",
         msgImported: "成功导入",
@@ -764,7 +762,6 @@ async function saveSubscription() {
 async function deleteSubscription() {
     const id = document.getElementById('subId').value;
     if (!id) return;
-    // 修复：添加汉化
     showConfirm(t('confirmDelSub'), async () => {
         globalSettings.subscriptions = globalSettings.subscriptions.filter(s => s.id !== id);
         globalSettings.preProxies = globalSettings.preProxies.filter(p => p.groupId !== id);
@@ -791,10 +788,8 @@ async function updateSubscriptionNodes(sub) {
             }
         });
         sub.lastUpdated = Date.now();
-        // 修复：添加汉化
         showAlert(`${t('msgSubUpdated')} ${sub.name} (${count} ${t('msgNodes')})`);
     } catch (e) {
-        // 修复：添加汉化
         showAlert(`${t('msgUpdateFailed')} ${e.message}`);
     }
 }
@@ -912,7 +907,6 @@ async function importSubscription(url) {
             }
         });
         renderProxyNodes(); await window.electronAPI.saveSettings(globalSettings);
-        // 修复：添加汉化
         showAlert(`${t('msgImported')} ${count} ${t('msgNodes')}`);
     } catch (e) { showAlert(t('subErr') + " " + e); }
 }

@@ -239,10 +239,7 @@ function generateXrayConfig(mainProxyStr, localPort, preProxyConfig = null) {
         log: { loglevel: "warning" },
         inbounds: [{ port: localPort, listen: "127.0.0.1", protocol: "socks", settings: { udp: true } }],
         outbounds: outbounds,
-        // 核心修复：路由策略支持双栈
         routing: {
-            // IPIfNonMatch: 如果域名规则没匹配到，尝试解析IP，如果解析出v4用v4，有v6用v6
-            // 这允许双栈流量正常通行，解决了 ip.sb 只显示 v6 的问题
             domainStrategy: "IPIfNonMatch",
             rules: [{ type: "field", outboundTag: "proxy_main", port: "0-65535" }]
         }

@@ -305,8 +305,6 @@ ipcMain.handle('launch-profile', async (event, profileId) => {
             dumpio: false
         });
 
-        // 无需 CDP 注入时区，全靠 JS 劫持
-
         activeProcesses[profileId] = { xrayPid: xrayProcess.pid, browser };
         sender.send('profile-status', { id: profileId, status: 'running' });
 
