@@ -53,7 +53,7 @@ function getChromiumPath() {
             }
         } catch (e) { return null; } return null;
     }
-    
+
     // macOS: Chrome binary is inside .app/Contents/MacOS/
     if (process.platform === 'darwin') {
         return findFile(basePath, 'Google Chrome for Testing');
@@ -121,8 +121,89 @@ ipcMain.handle('test-proxy-latency', async (e, proxyStr) => {
 });
 ipcMain.handle('set-title-bar-color', (e, colors) => { const win = BrowserWindow.fromWebContents(e.sender); if (win) { if (process.platform === 'win32') try { win.setTitleBarOverlay({ color: colors.bg, symbolColor: colors.symbol }); } catch (e) { } win.setBackgroundColor(colors.bg); } });
 ipcMain.handle('check-app-update', async () => { try { const data = await fetchJson('https://api.github.com/repos/EchoHS/GeekezBrowser/releases/latest'); if (!data || !data.tag_name) return { update: false }; const remote = data.tag_name.replace('v', ''); if (compareVersions(remote, app.getVersion()) > 0) { shell.openExternal(data.html_url); return { update: true, remote }; } return { update: false }; } catch (e) { return { update: false, error: e.message }; } });
-ipcMain.handle('check-xray-update', async () => { try { const data = await fetchJson('https://api.github.com/repos/XTLS/Xray-core/releases/latest'); if (!data || !data.tag_name) return { update: false }; const remoteVer = data.tag_name; const currentVer = await getLocalXrayVersion(); if (remoteVer !== currentVer) { let assetName = ''; const arch = os.arch(); const platform = os.platform(); if (platform === 'win32') assetName = `Xray-windows-${arch === 'x64' ? '64' : '32'}.zip`; else if (platform === 'darwin') assetName = `Xray-macos-${arch === 'arm64' ? 'arm64-v8a' : '64'}.zip`; else assetName = `Xray-linux-${arch === 'x64' ? '64' : '32'}.zip`; const downloadUrl = `https://gh-proxy.com/https://github.com/XTLS/Xray-core/releases/download/${remoteVer}/${assetName}`; return { update: true, remote: remoteVer, downloadUrl }; } return { update: false }; } catch (e) { return { update: false }; } });
-ipcMain.handle('download-xray-update', async (e, url) => { const zipPath = path.join(path.dirname(BIN_PATH), 'update_xray.zip'); const destDir = path.dirname(BIN_PATH); try { await downloadFile(url, zipPath); if (process.platform === 'win32') await new Promise((resolve) => exec('taskkill /F /IM xray.exe', () => resolve())); activeProcesses = {}; await new Promise(r => setTimeout(r, 1500)); await extractZip(zipPath, destDir); fs.unlinkSync(zipPath); if (process.platform !== 'win32') fs.chmodSync(BIN_PATH, '755'); return true; } catch (e) { try { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); } catch (err) { } return false; } });
+ipcMain.handle('check-xray-update', async () => { try { const data = await fetchJson('https://api.github.com/repos/XTLS/Xray-core/releases/latest'); if (!data || !data.tag_name) return { update: false }; const remoteVer = data.tag_name; const currentVer = await getLocalXrayVersion(); if (remoteVer !== currentVer) { let assetName = ''; const arch = os.arch(); const platform = os.platform(); if (platform === 'win32') assetName = `Xray-windows-${arch === 'x64' ? '64' : '32'}.zip`; else if (platform === 'darwin') assetName = `Xray-macos-${arch === 'arm64' ? 'arm64-v8a' : '64'}.zip`; else assetName = `Xray-linux-${arch === 'x64' ? '64' : '32'}.zip`; const downloadUrl = `https://gh-proxy.com/https://github.com/XTLS/Xray-core/releases/download/${remoteVer}/${assetName}`; return { update: true, remote: remoteVer.replace(/^v/, ''), downloadUrl }; } return { update: false }; } catch (e) { return { update: false }; } });
+ipcMain.handle('download-xray-update', async (e, url) => {
+    const exeName = process.platform === 'win32' ? 'xray.exe' : 'xray';
+    const tempBase = os.tmpdir();
+    const updateId = `xray_update_${Date.now()}`;
+    const tempDir = path.join(tempBase, updateId);
+    const zipPath = path.join(tempDir, 'xray.zip');
+    try {
+        fs.mkdirSync(tempDir, { recursive: true });
+        await downloadFile(url, zipPath);
+        if (process.platform === 'win32') await new Promise((resolve) => exec('taskkill /F /IM xray.exe', () => resolve()));
+        activeProcesses = {};
+        await new Promise(r => setTimeout(r, 3000));
+        const extractDir = path.join(tempDir, 'extracted');
+        fs.mkdirSync(extractDir, { recursive: true });
+        await extractZip(zipPath, extractDir);
+        function findXrayBinary(dir) {
+            const files = fs.readdirSync(dir);
+            for (const file of files) {
+                const fullPath = path.join(dir, file);
+                const stat = fs.statSync(fullPath);
+                if (stat.isDirectory()) {
+                    const found = findXrayBinary(fullPath);
+                    if (found) return found;
+                } else if (file === exeName) {
+                    return fullPath;
+                }
+            }
+            return null;
+        }
+        const xrayBinary = findXrayBinary(extractDir);
+        console.log('[Update Debug] Searched in:', extractDir);
+        console.log('[Update Debug] Found binary:', xrayBinary);
+        if (!xrayBinary) {
+            // 列出所有文件帮助调试
+            const allFiles = [];
+            function listAllFiles(dir, prefix = '') {
+                const files = fs.readdirSync(dir);
+                files.forEach(file => {
+                    const fullPath = path.join(dir, file);
+                    const stat = fs.statSync(fullPath);
+                    if (stat.isDirectory()) {
+                        allFiles.push(prefix + file + '/');
+                        listAllFiles(fullPath, prefix + file + '/');
+                    } else {
+                        allFiles.push(prefix + file);
+                    }
+                });
+            }
+            listAllFiles(extractDir);
+            console.log('[Update Debug] All extracted files:', allFiles);
+            throw new Error('Xray binary not found in package');
+        }
+
+        // Windows文件锁规避：先重命名旧文件，再复制新文件
+        const oldPath = BIN_PATH + '.old';
+        if (fs.existsSync(BIN_PATH)) {
+            try {
+                if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+            } catch (e) { }
+            fs.renameSync(BIN_PATH, oldPath);
+        }
+        fs.copyFileSync(xrayBinary, BIN_PATH);
+        // 删除旧文件
+        try {
+            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        } catch (e) { }
+        if (process.platform !== 'win32') fs.chmodSync(BIN_PATH, '755');
+        // 清理临时目录（即使失败也不影响更新）
+        try {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        } catch (cleanupErr) {
+            console.warn('[Cleanup Warning] Failed to remove temp dir:', cleanupErr.message);
+        }
+        return true;
+    } catch (e) {
+        console.error('Xray update failed:', e);
+        try {
+            if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+        } catch (err) { }
+        return false;
+    }
+});
 ipcMain.handle('get-running-ids', () => Object.keys(activeProcesses));
 ipcMain.handle('get-profiles', async () => { if (!fs.existsSync(PROFILES_FILE)) return []; return fs.readJson(PROFILES_FILE); });
 ipcMain.handle('update-profile', async (event, updatedProfile) => { let profiles = await fs.readJson(PROFILES_FILE); const index = profiles.findIndex(p => p.id === updatedProfile.id); if (index > -1) { profiles[index] = updatedProfile; await fs.writeJson(PROFILES_FILE, profiles); return true; } return false; });
@@ -333,4 +414,17 @@ function fetchJson(url) { return new Promise((resolve, reject) => { const req = 
 function getLocalXrayVersion() { return new Promise((resolve) => { if (!fs.existsSync(BIN_PATH)) return resolve('v0.0.0'); try { const proc = spawn(BIN_PATH, ['-version']); let output = ''; proc.stdout.on('data', d => output += d.toString()); proc.on('close', () => { const match = output.match(/Xray\s+v?(\d+\.\d+\.\d+)/i); resolve(match ? (match[1].startsWith('v') ? match[1] : 'v' + match[1]) : 'v0.0.0'); }); proc.on('error', () => resolve('v0.0.0')); } catch (e) { resolve('v0.0.0'); } }); }
 function compareVersions(v1, v2) { const p1 = v1.split('.').map(Number); const p2 = v2.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((p1[i] || 0) > (p2[i] || 0)) return 1; if ((p1[i] || 0) < (p2[i] || 0)) return -1; } return 0; }
 function downloadFile(url, dest) { return new Promise((resolve, reject) => { const file = fs.createWriteStream(dest); https.get(url, (response) => { if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) { downloadFile(response.headers.location, dest).then(resolve).catch(reject); return; } response.pipe(file); file.on('finish', () => file.close(resolve)); }).on('error', (err) => { fs.unlink(dest, () => { }); reject(err); }); }); }
-function extractZip(zipPath, destDir) { return new Promise((resolve, reject) => { if (os.platform() === 'win32') { exec(`powershell -command "Expand-Archive -Path '${zipPath}' -DestinationPath '${destDir}' -Force"`, (err) => { if (err) reject(err); else resolve(); }); } else { exec(`unzip -o "${zipPath}" -d "${destDir}"`, (err) => { if (err) reject(err); else resolve(); }); } }); }
+function extractZip(zipPath, destDir) {
+    return new Promise((resolve, reject) => {
+        try {
+            const AdmZip = require('adm-zip');
+            const zip = new AdmZip(zipPath);
+            zip.extractAllTo(destDir, true);
+            console.log('[Extract Success] Extracted to:', destDir);
+            resolve();
+        } catch (err) {
+            console.error('[Extract Error]', err);
+            reject(err);
+        }
+    });
+}

@@ -236,7 +236,7 @@ function renderHelpContent() {
          <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">3. 前置代理</h4><p style="font-size:14px;">可选功能。用于隐藏本机IP或链路加速。</p></div>`;
 
     const aboutHTML = curLang === 'en' ?
-        `<div style="text-align:center;margin-bottom:20px;"><div style="font-size:24px;font-weight:bold;color:var(--text-primary);">Geek<span style="color:var(--accent);">EZ</span></div><div style="font-size:12px;opacity:0.6;">v1.2.1</div></div>
+        `<div style="text-align:center;margin-bottom:20px;"><div style="font-size:24px;font-weight:bold;color:var(--text-primary);">Geek<span style="color:var(--accent);">EZ</span></div><div style="font-size:12px;opacity:0.6;">v1.2.2</div></div>
          <h4 style="border-bottom:1px solid var(--border);padding-bottom:5px;color:var(--text-primary);">Technology</h4><p style="font-size:13px;margin-bottom:20px;">Electron + Puppeteer. Native Code Spoofing & Noise Injection.</p>
          <h4 style="border-bottom:1px solid var(--border);padding-bottom:5px;color:var(--text-primary);">Platform Analysis</h4>
          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px;">
@@ -247,7 +247,7 @@ function renderHelpContent() {
             <div style="background:rgba(0,0,0,0.15);padding:10px;border-radius:6px;"><div style="color:#bf0000;font-weight:bold;">Rakuten</div><div style="font-size:11px;margin-top:5px;">Strict IP check.</div></div>
             <div style="background:rgba(0,0,0,0.15);padding:10px;border-radius:6px;"><div style="color:#f1c40f;font-weight:bold;">Mercado</div><div style="font-size:11px;margin-top:5px;">Safe. Similar to Amazon.</div></div>
          </div>` :
-        `<div style="text-align:center;margin-bottom:20px;"><div style="font-size:24px;font-weight:bold;color:var(--text-primary);">Geek<span style="color:var(--accent);">EZ</span></div><div style="font-size:12px;opacity:0.6;">v1.2.1</div></div>
+        `<div style="text-align:center;margin-bottom:20px;"><div style="font-size:24px;font-weight:bold;color:var(--text-primary);">Geek<span style="color:var(--accent);">EZ</span></div><div style="font-size:12px;opacity:0.6;">v1.2.2</div></div>
          <h4 style="border-bottom:1px solid var(--border);padding-bottom:5px;color:var(--text-primary);">技术内核</h4><p style="font-size:13px;margin-bottom:20px;">Native Code 伪装 + 多媒体噪音注入，有效对抗指纹。</p>
          <h4 style="border-bottom:1px solid var(--border);padding-bottom:5px;color:var(--text-primary);">平台适用性</h4>
          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px;">
@@ -989,45 +989,45 @@ function closeHelp() { document.getElementById('helpModal').style.display = 'non
 function initCustomTimezoneDropdown(inputId, dropdownId) {
     const input = document.getElementById(inputId);
     const dropdown = document.getElementById(dropdownId);
-    
+
     if (!input || !dropdown || !window.TIMEZONES) return;
-    
+
     let selectedIndex = -1;
-    
+
     // Populate dropdown with all timezones
     function populateDropdown(filter = '') {
-        const filtered = window.TIMEZONES.filter(tz => 
+        const filtered = window.TIMEZONES.filter(tz =>
             tz.toLowerCase().includes(filter.toLowerCase())
         );
-        
-        dropdown.innerHTML = filtered.map((tz, index) => 
+
+        dropdown.innerHTML = filtered.map((tz, index) =>
             `<div class="timezone-item" data-value="${tz}" data-index="${index}">${tz}</div>`
         ).join('');
-        
+
         selectedIndex = -1;
     }
-    
+
     // Show dropdown
     function showDropdown() {
         populateDropdown(input.value);
         dropdown.classList.add('active');
     }
-    
+
     // Hide dropdown
     function hideDropdown() {
         dropdown.classList.remove('active');
         selectedIndex = -1;
     }
-    
+
     // Select item
     function selectItem(value) {
         input.value = value;
         hideDropdown();
     }
-    
+
     // Input focus - show dropdown
     input.addEventListener('focus', showDropdown);
-    
+
     // Input typing - filter
     input.addEventListener('input', () => {
         populateDropdown(input.value);
@@ -1035,11 +1035,11 @@ function initCustomTimezoneDropdown(inputId, dropdownId) {
             dropdown.classList.add('active');
         }
     });
-    
+
     // Keyboard navigation
     input.addEventListener('keydown', (e) => {
         const items = dropdown.querySelectorAll('.timezone-item:not(.hidden)');
-        
+
         if (e.key === 'ArrowDown') {
             e.preventDefault();
             selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
@@ -1055,7 +1055,7 @@ function initCustomTimezoneDropdown(inputId, dropdownId) {
             hideDropdown();
         }
     });
-    
+
     // Update selection highlight
     function updateSelection(items) {
         items.forEach((item, index) => {
@@ -1065,7 +1065,7 @@ function initCustomTimezoneDropdown(inputId, dropdownId) {
             items[selectedIndex].scrollIntoView({ block: 'nearest' });
         }
     }
-    
+
     // Click on item
     dropdown.addEventListener('click', (e) => {
         const item = e.target.closest('.timezone-item');
@@ -1073,7 +1073,7 @@ function initCustomTimezoneDropdown(inputId, dropdownId) {
             selectItem(item.dataset.value);
         }
     });
-    
+
     // Click outside to close
     document.addEventListener('click', (e) => {
         if (!input.contains(e.target) && !dropdown.contains(e.target)) {
