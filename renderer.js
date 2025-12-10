@@ -817,6 +817,13 @@ async function testCurrentGroup() {
         return p.groupId === currentProxyGroup;
     });
     if (list.length === 0) return;
+
+    // 先将所有测试按钮设置为加载状态
+    list.forEach(p => {
+        const btn = Array.from(document.querySelectorAll('#preProxyList button.outline')).find(el => el.onclick && el.onclick.toString().includes(p.id));
+        if (btn) btn.innerText = "...";
+    });
+
     const promises = list.map(async (p) => {
         const res = await window.electronAPI.invoke('test-proxy-latency', p.url);
         p.latency = res.success ? res.latency : -1;

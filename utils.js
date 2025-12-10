@@ -96,7 +96,11 @@ function parseProxyLink(link, tag) {
                 outbound.streamSettings.grpcSettings = { serviceName: params.get("serviceName") };
             } else if (type === 'xhttp' || type === 'splithttp') {
                 outbound.streamSettings.network = "xhttp";
-                outbound.streamSettings.xhttpSettings = { path: params.get("path") || "/", host: params.get("host") || "" };
+                outbound.streamSettings.xhttpSettings = {
+                    path: params.get("path") || "/",
+                    host: params.get("host") || "",
+                    mode: params.get("mode") || "stream-up"
+                };
             } else if (type === 'kcp') {
                 outbound.streamSettings.kcpSettings = { header: { type: params.get("headerType") || "none" }, seed: params.get("seed") };
             } else if (type === 'h2') {
@@ -201,8 +205,18 @@ function parseProxyLink(link, tag) {
                     port: parseInt(port),
                     method: method,
                     password: password,
-                    ivCheck: true
+                    ota: false,
+                    level: 1
                 }]
+            };
+            // Shadowsocks streamSettings
+            outbound.streamSettings = {
+                network: "tcp"
+            };
+            // Mux 配置
+            outbound.mux = {
+                enabled: false,
+                concurrency: -1
             };
         } else if (link.startsWith('socks')) {
             const urlObj = new URL(link.replace(/^socks5?:\/\//, 'http://'));
