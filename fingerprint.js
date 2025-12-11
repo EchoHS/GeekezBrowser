@@ -93,6 +93,20 @@ function getInjectScript(fp, profileName, watermarkStyle) {
     return `
     (function() {
         try {
+            // 最小化白名单：仅针对已知会出现空白页的登录页面
+            const loginPageWhitelist = [
+                'signin.aws.amazon.com',
+                'awsapps.com/start',
+                'cloud.oracle.com'
+            ];
+            
+            const currentHost = window.location.hostname;
+            const currentPath = window.location.pathname;
+            const fullUrl = currentHost + currentPath;
+            
+            // 只在真正的登录页面跳过时区 Hook
+            const isLoginPage = loginPageWhitelist.some(domain => fullUrl.includes(domain));
+            
             const fp = ${fpJson};
             const targetTimezone = fp.timezone || "America/Los_Angeles";
 
@@ -101,7 +115,8 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                 Object.defineProperty(navigator, 'webdriver', { get: () => false });
             }
 
-            // --- 2. 时区伪装 (高级 Hook) ---
+            // --- 2. 时区伪装 (仅在非登录页生效) ---
+            if (!isLoginPage) {
             try {
                 // 2.1 Hook Intl.DateTimeFormat
                 const OriginalDateTimeFormat = Intl.DateTimeFormat;
@@ -179,6 +194,7 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                 });
 
             } catch(e) { console.error("TZ Error", e); }
+            } // 结束 isLoginPage 检查
 
             // --- 3. Canvas Noise ---
             const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
