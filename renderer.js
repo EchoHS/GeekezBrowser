@@ -530,7 +530,7 @@ async function openEditModal(id) {
     document.getElementById('editTags').value = (p.tags || []).join(', ');
 
     // 回填时区，如果没有则默认 LA
-    document.getElementById('editTimezone').value = fp.timezone || 'America/Los_Angeles';
+    document.getElementById('editTimezone').value = fp.timezone || 'Auto (No Change)';
 
     const sel = document.getElementById('editPreProxyOverride');
     sel.options[0].text = t('optDefault'); sel.options[1].text = t('optOn'); sel.options[2].text = t('optOff');
@@ -557,10 +557,12 @@ async function saveEditProfile() {
 
         if (!p.fingerprint) p.fingerprint = {};
         // 保存时区
-        p.fingerprint.timezone = document.getElementById('editTimezone').value;
-
+        p.fingerprint.platform = document.getElementById('editPlatform').value;
         p.fingerprint.screen = { width: parseInt(document.getElementById('editResW').value), height: parseInt(document.getElementById('editResH').value) };
         p.fingerprint.window = p.fingerprint.screen;
+        const timezoneValue = document.getElementById('editTimezone').value;
+        // 将 "Auto (No Change)" 转换为 "Auto" 存储
+        p.fingerprint.timezone = timezoneValue === 'Auto (No Change)' ? 'Auto' : timezoneValue;
         p.fingerprint.userAgent = document.getElementById('editUA').value;
         p.fingerprint.webgl = { vendor: document.getElementById('editGpuVendor').value, renderer: document.getElementById('editGpuRenderer').value };
         p.fingerprint.noiseSeed = parseInt(document.getElementById('editSeed').value);

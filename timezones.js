@@ -1,5 +1,6 @@
-// Comprehensive IANA timezone list for global coverage
+// Comprehensive IANA Timezone list for dropdown
 const TIMEZONES = [
+    "Auto (No Change)",  // 不修改时区，用于需要访问登录页面的环境
     // --- North America ---
     "America/New_York",        // US Eastern
     "America/Chicago",         // US Central

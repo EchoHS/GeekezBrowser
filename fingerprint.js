@@ -93,20 +93,6 @@ function getInjectScript(fp, profileName, watermarkStyle) {
     return `
     (function() {
         try {
-            // 最小化白名单：仅针对已知会出现空白页的登录页面
-            const loginPageWhitelist = [
-                'signin.aws.amazon.com',
-                'awsapps.com/start',
-                'cloud.oracle.com'
-            ];
-            
-            const currentHost = window.location.hostname;
-            const currentPath = window.location.pathname;
-            const fullUrl = currentHost + currentPath;
-            
-            // 只在真正的登录页面跳过时区 Hook
-            const isLoginPage = loginPageWhitelist.some(domain => fullUrl.includes(domain));
-            
             const fp = ${fpJson};
             const targetTimezone = fp.timezone || "America/Los_Angeles";
 
@@ -115,8 +101,9 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                 Object.defineProperty(navigator, 'webdriver', { get: () => false });
             }
 
-            // --- 2. 时区伪装 (仅在非登录页生效) ---
-            if (!isLoginPage) {
+            // --- 2. 时区伪装 (仅在设置了时区时生效，Auto 则跳过) ---
+            // 如果用户选择 "Auto (No Change)"，则不修改时区
+            if (targetTimezone && targetTimezone !== 'Auto') {
             try {
                 // 2.1 Hook Intl.DateTimeFormat
                 const OriginalDateTimeFormat = Intl.DateTimeFormat;
