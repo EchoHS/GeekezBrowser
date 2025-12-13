@@ -449,7 +449,7 @@ ipcMain.handle('launch-profile', async (event, profileId, watermarkStyle) => {
             throw new Error("Chrome binary not found.");
         }
 
-        // 准备环境变量：使用 TZ 变量进行原生无痕时区修改 (Mac/Linux 完美支持)
+        // 时区设置
         const env = { ...process.env };
         if (profile.fingerprint?.timezone && profile.fingerprint.timezone !== 'Auto') {
             env.TZ = profile.fingerprint.timezone;

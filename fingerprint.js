@@ -195,9 +195,6 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                 });
             }
 
-            // --- 2. 时区伪装 (已迁移至 CDP 底层实现，此处不再注入 JS) ---
-            // JS Hook 容易被检测，现在使用 Emulation.setTimezoneOverride
-            
             // --- 3. Canvas Noise ---
             const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
             CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
