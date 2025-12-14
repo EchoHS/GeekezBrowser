@@ -132,6 +132,19 @@ npm run build:linux
 - ✅ **TLS Fingerprint**: Real Chrome (identical to commercial tools)
 - ✅ **Language Spoofing**: Minimal Intl API hook, no detection
 
+## ❓ FAQ
+
+### macOS: "App is damaged" or "Cannot be opened"
+This error occurs because apps built via GitHub Actions are not signed by an Apple Developer Certificate (requires $99/year). macOS Gatekeeper blocks them by default.
+
+**Solution**:
+1. Drag `GeekEZ Browser` into your **Applications** folder.
+2. Open Terminal and run the following command (enter password if prompted):
+   ```bash
+   sudo xattr -rd com.apple.quarantine /Applications/GeekEZ\ Browser.app
+   ```
+3. Re-open the app.
+
 ## ⚠️ Important Notes
 
 1. **Timezone Settings**: Use "Auto (No Change)" when logging into AWS, Oracle, or other sensitive websites to avoid white screen issues.
