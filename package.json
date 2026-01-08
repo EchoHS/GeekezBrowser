@@ -61,12 +61,10 @@
         }
       ],
       "icon": "icon.ico",
-      "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
-    },
-    "zip": {
       "artifactName": "${productName}-${version}-${os}-${arch}-portable.${ext}"
     },
     "nsis": {
+      "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,

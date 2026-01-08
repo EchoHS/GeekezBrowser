@@ -66,6 +66,10 @@ function getChromiumPath() {
     if (process.platform === 'darwin') {
         return findFile(basePath, 'Google Chrome for Testing');
     }
+    // Linux
+    if (process.platform === 'linux') {
+        return findFile(basePath, 'chrome');
+    }
     // Windows
     return findFile(basePath, 'chrome.exe');
 }
