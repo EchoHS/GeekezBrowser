@@ -85,7 +85,7 @@ jobs:
           unzip -o xray.zip -d "$BIN_DIR/" && rm xray.zip
           mv "$BIN_DIR/geoip.dat" "$BIN_DIR/geosite.dat" resources/bin/ 2>/dev/null || true
           rm -f "$BIN_DIR"/{LICENSE,README.md}
-          [ "${{ matrix.os }}" != "win32" ] && chmod +x "$BIN_DIR/xray"
+          [ "${{ matrix.os }}" != "win32" ] && chmod +x "$BIN_DIR/xray" || true
 
       - name: Download Chrome
         run: npx @puppeteer/browsers install chrome@143.0.7499.169 --path resources/puppeteer

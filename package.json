@@ -63,9 +63,6 @@
       "icon": "icon.ico",
       "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
     },
-    "zip": {
-      "artifactName": "${productName}-${version}-${os}-${arch}-portable.${ext}"
-    },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
