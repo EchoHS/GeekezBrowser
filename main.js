@@ -47,26 +47,105 @@ function forceKill(pid) {
     });
 }
 
-function getChromiumPath() {
-    const basePath = isDev ? path.join(__dirname, 'resources', 'puppeteer') : path.join(process.resourcesPath, 'puppeteer');
+/**
+ * 获取 Chrome 可执行文件路径
+ * @param {string} browserType - 'system' | 'builtin' | 'custom'
+ * @param {string} customPath - 自定义路径（当 browserType 为 'custom' 时）
+ * @returns {string|null} Chrome 路径
+ */
+function getChromiumPath(browserType = 'builtin', customPath = null) {
+    const platform = process.platform;
+
+    // 如果用户选择自定义路径
+    if (browserType === 'custom') {
+        if (customPath && fs.existsSync(customPath)) {
+            console.log(`[Chrome] 使用自定义路径: ${customPath}`);
+            return customPath;
+        }
+        console.error('[Chrome] 自定义路径无效或不存在:', customPath);
+        // 降级到系统浏览器
+        browserType = 'system';
+    }
+
+    // 如果用户选择系统浏览器，优先尝试系统路径
+    if (browserType === 'system') {
+        const systemPaths = getSystemChromePaths(platform);
+        for (const chromePath of systemPaths) {
+            if (fs.existsSync(chromePath)) {
+                console.log(`[Chrome] 使用系统 Chrome: ${chromePath}`);
+                return chromePath;
+            }
+        }
+        console.warn('[Chrome] 未找到系统 Chrome，降级到内置版本');
+    }
+
+    // 降级或用户选择内置浏览器：查找本地下载版本
+    const localChromePath = findLocalChromium();
+    if (localChromePath) {
+        console.log(`[Chrome] 使用${browserType === 'builtin' ? '内置' : '降级到内置'}版本: ${localChromePath}`);
+        return localChromePath;
+    }
+
+    // 未找到任何 Chrome
+    console.error('[Chrome] 未找到可用的 Chrome 浏览器');
+    return null;
+}
+
+/**
+ * 获取系统 Chrome 的标准安装路径
+ */
+function getSystemChromePaths(platform) {
+    const paths = [];
+
+    if (platform === 'darwin') {
+        paths.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+        paths.push(path.join(os.homedir(), 'Applications/Google Chrome.app/Contents/MacOS/Google Chrome'));
+    } else if (platform === 'win32') {
+        paths.push('C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
+        paths.push('C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe');
+        const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+        paths.push(path.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+    } else if (platform === 'linux') {
+        paths.push('/usr/bin/google-chrome-stable');
+        paths.push('/usr/bin/google-chrome');
+        paths.push('/usr/bin/chromium-browser');
+    }
+
+    return paths;
+}
+
+/**
+ * 查找本地下载的 Chrome for Testing
+ */
+function findLocalChromium() {
+    const basePath = isDev
+        ? path.join(__dirname, 'resources', 'puppeteer')
+        : path.join(process.resourcesPath, 'puppeteer');
+
     if (!fs.existsSync(basePath)) return null;
+
     function findFile(dir, filename) {
         try {
             const files = fs.readdirSync(dir);
             for (const file of files) {
                 const fullPath = path.join(dir, file);
                 const stat = fs.statSync(fullPath);
-                if (stat.isDirectory()) { const res = findFile(fullPath, filename); if (res) return res; }
-                else if (file === filename) return fullPath;
+                if (stat.isDirectory()) {
+                    const res = findFile(fullPath, filename);
+                    if (res) return res;
+                } else if (file === filename) {
+                    return fullPath;
+                }
             }
-        } catch (e) { return null; } return null;
+        } catch (e) {
+            console.warn(`[Chrome] 扫描目录失败: ${dir}`, e.message);
+        }
+        return null;
     }
 
-    // macOS: Chrome binary is inside .app/Contents/MacOS/
     if (process.platform === 'darwin') {
         return findFile(basePath, 'Google Chrome for Testing');
     }
-    // Windows
     return findFile(basePath, 'chrome.exe');
 }
 
@@ -236,7 +315,16 @@ ipcMain.handle('download-xray-update', async (e, url) => {
     }
 });
 ipcMain.handle('get-running-ids', () => Object.keys(activeProcesses));
-ipcMain.handle('get-profiles', async () => { if (!fs.existsSync(PROFILES_FILE)) return []; return fs.readJson(PROFILES_FILE); });
+ipcMain.handle('get-profiles', async () => {
+    if (!fs.existsSync(PROFILES_FILE)) return [];
+    const profiles = await fs.readJson(PROFILES_FILE);
+
+    // 为现有配置添加默认 browserType
+    return profiles.map(p => ({
+        ...p,
+        browserType: p.browserType || 'builtin'
+    }));
+});
 ipcMain.handle('update-profile', async (event, updatedProfile) => { let profiles = await fs.readJson(PROFILES_FILE); const index = profiles.findIndex(p => p.id === updatedProfile.id); if (index > -1) { profiles[index] = updatedProfile; await fs.writeJson(PROFILES_FILE, profiles); return true; } return false; });
 ipcMain.handle('save-profile', async (event, data) => {
     const profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
@@ -260,6 +348,8 @@ ipcMain.handle('save-profile', async (event, data) => {
         tags: data.tags || [],
         fingerprint: fingerprint,
         preProxyOverride: 'default',
+        browserType: data.browserType || 'builtin',
+        ...((data.browserType || 'builtin') === 'custom' ? { customBrowserPath: data.customBrowserPath } : {}),
         isSetup: false,
         createdAt: Date.now()
     };
@@ -367,9 +457,136 @@ ipcMain.handle('get-user-extensions', async () => {
     const settings = await fs.readJson(SETTINGS_FILE);
     return settings.userExtensions || [];
 });
+// 选择 Chrome 可执行文件
+ipcMain.handle('select-chrome-executable', async () => {
+    try {
+        const dialogProperties = ['openFile'];
+
+        // macOS: 允许进入 .app 包内部选择文件
+        if (process.platform === 'darwin') {
+            dialogProperties.push('treatPackageAsDirectory');
+        }
+
+        const result = await dialog.showOpenDialog({
+            title: '选择 Chrome 可执行文件',
+            properties: dialogProperties,
+            filters: process.platform === 'darwin'
+                ? [
+                    { name: 'Chrome 可执行文件', extensions: ['app', '*'] },
+                    { name: '所有文件', extensions: ['*'] }
+                ]
+                : process.platform === 'win32'
+                ? [
+                    { name: 'Chrome 可执行文件', extensions: ['exe'] },
+                    { name: '所有文件', extensions: ['*'] }
+                ]
+                : [
+                    { name: '所有文件', extensions: ['*'] }
+                ]
+        });
+
+        if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+            console.log('[Chrome] 选择可执行文件已取消');
+            return null;
+        }
+
+        let selectedPath = result.filePaths[0];
+
+        // macOS: 如果选择了 .app，返回内部可执行文件路径
+        if (process.platform === 'darwin' && selectedPath.endsWith('.app')) {
+            const testingPath = path.join(selectedPath, 'Contents', 'MacOS', 'Google Chrome for Testing');
+            const stablePath = path.join(selectedPath, 'Contents', 'MacOS', 'Google Chrome');
+            if (fs.existsSync(testingPath)) {
+                selectedPath = testingPath;
+            } else if (fs.existsSync(stablePath)) {
+                selectedPath = stablePath;
+            } else {
+                console.warn('[Chrome] 未找到 .app 内部可执行文件:', selectedPath);
+                return null;
+            }
+        }
+
+        if (!fs.existsSync(selectedPath)) {
+            console.warn('[Chrome] 选择的路径不存在:', selectedPath);
+            return null;
+        }
+
+        console.log('[Chrome] 选择自定义路径:', selectedPath);
+        return selectedPath;
+    } catch (err) {
+        console.error('[Chrome] 选择 Chrome 可执行文件失败:', err);
+        return null;
+    }
+});
+
+// 检测浏览器路径
+ipcMain.handle('detect-browser-path', async (event, browserType, customPath) => {
+    try {
+        if (browserType === 'custom') {
+            if (customPath && fs.existsSync(customPath)) {
+                return customPath;
+            }
+            console.warn('[Chrome] 自定义路径无效或不存在:', customPath);
+            return null;
+        }
+
+        // 模拟 getChromiumPath 的检测逻辑
+        if (browserType === 'system') {
+            const systemPaths = getSystemChromePaths(process.platform);
+            for (const chromePath of systemPaths) {
+                if (fs.existsSync(chromePath)) {
+                    return chromePath;
+                }
+            }
+        }
+
+        // 检测内置版本
+        const localChromePath = findLocalChromium();
+        return localChromePath || null;
+    } catch (err) {
+        console.error('[Chrome] 检测浏览器路径失败:', err);
+        return null;
+    }
+});
 ipcMain.handle('open-url', async (e, url) => { await shell.openExternal(url); });
 ipcMain.handle('export-data', async (e, type) => { const profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : []; const settings = fs.existsSync(SETTINGS_FILE) ? await fs.readJson(SETTINGS_FILE) : { preProxies: [], subscriptions: [] }; let exportObj = {}; if (type === 'all' || type === 'profiles') exportObj.profiles = profiles; if (type === 'all' || type === 'proxies') { exportObj.preProxies = settings.preProxies || []; exportObj.subscriptions = settings.subscriptions || []; } if (Object.keys(exportObj).length === 0) return false; const { filePath } = await dialog.showSaveDialog({ title: 'Export Data', defaultPath: `GeekEZ_Backup_${type}_${Date.now()}.yaml`, filters: [{ name: 'YAML', extensions: ['yml', 'yaml'] }] }); if (filePath) { await fs.writeFile(filePath, yaml.dump(exportObj)); return true; } return false; });
 ipcMain.handle('import-data', async () => { const { filePaths } = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'YAML', extensions: ['yml', 'yaml'] }] }); if (filePaths && filePaths.length > 0) { try { const content = await fs.readFile(filePaths[0], 'utf8'); const data = yaml.load(content); let updated = false; if (data.profiles || data.preProxies || data.subscriptions) { if (Array.isArray(data.profiles)) { const currentProfiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : []; data.profiles.forEach(p => { const idx = currentProfiles.findIndex(cp => cp.id === p.id); if (idx > -1) currentProfiles[idx] = p; else { if (!p.id) p.id = uuidv4(); currentProfiles.push(p); } }); await fs.writeJson(PROFILES_FILE, currentProfiles); updated = true; } if (Array.isArray(data.preProxies) || Array.isArray(data.subscriptions)) { const currentSettings = fs.existsSync(SETTINGS_FILE) ? await fs.readJson(SETTINGS_FILE) : { preProxies: [], subscriptions: [] }; if (data.preProxies) { if (!currentSettings.preProxies) currentSettings.preProxies = []; data.preProxies.forEach(p => { if (!currentSettings.preProxies.find(cp => cp.id === p.id)) currentSettings.preProxies.push(p); }); } if (data.subscriptions) { if (!currentSettings.subscriptions) currentSettings.subscriptions = []; data.subscriptions.forEach(s => { if (!currentSettings.subscriptions.find(cs => cs.id === s.id)) currentSettings.subscriptions.push(s); }); } await fs.writeJson(SETTINGS_FILE, currentSettings); updated = true; } } else if (data.name && data.proxyStr && data.fingerprint) { const profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : []; const newProfile = { ...data, id: uuidv4(), isSetup: false, createdAt: Date.now() }; profiles.push(newProfile); await fs.writeJson(PROFILES_FILE, profiles); updated = true; } return updated; } catch (e) { console.error(e); throw e; } } return false; });
+
+ipcMain.handle('close-profile', async (event, profileId) => {
+    if (!activeProcesses[profileId]) {
+        return { success: false, message: 'Profile not running' };
+    }
+
+    try {
+        const { xrayPid, browser, logFd } = activeProcesses[profileId];
+
+        // 关闭浏览器
+        await browser.close();
+
+        // 杀死 xray 进程
+        await forceKill(xrayPid);
+
+        // 关闭日志文件描述符
+        if (logFd !== undefined) {
+            try {
+                fs.closeSync(logFd);
+            } catch (e) {
+                console.error('Failed to close log fd:', e.message);
+            }
+        }
+
+        // 从 activeProcesses 中移除
+        delete activeProcesses[profileId];
+
+        // 发送状态更新
+        event.sender.send('profile-status', { id: profileId, status: 'stopped' });
+
+        return { success: true };
+    } catch (err) {
+        console.error('Close profile error:', err);
+        return { success: false, message: err.message };
+    }
+});
 
 // --- 核心启动逻辑 ---
 ipcMain.handle('launch-profile', async (event, profileId, watermarkStyle) => {
@@ -531,11 +748,25 @@ ipcMain.handle('launch-profile', async (event, profileId, watermarkStyle) => {
 
 
         // 5. 启动浏览器
-        const chromePath = getChromiumPath();
+        // 从 profile 读取浏览器类型配置
+        const browserType = profile.browserType || 'builtin';
+        const customPath = profile.customBrowserPath || null;
+        const chromePath = getChromiumPath(browserType, customPath);
+
         if (!chromePath) {
+            const { dialog } = require('electron');
+            const errorMsg = browserType === 'custom'
+                ? '未找到可用的 Chrome（自定义/系统/内置均不可用）。\n\n请重新选择有效的自定义路径，或安装 Chrome/运行 npm run setup。'
+                : browserType === 'system'
+                    ? '未找到系统 Chrome 浏览器。\n\n请安装 Google Chrome 或在配置中切换到"内置 Chrome"。'
+                    : '未找到内置 Chrome。\n\n请运行 npm run setup 下载或切换到"系统 Chrome"。';
+
+            dialog.showErrorBox('Chrome 未找到', errorMsg);
             await forceKill(xrayProcess.pid);
-            throw new Error("Chrome binary not found.");
+            return;
         }
+
+        console.log(`[Puppeteer] 启动浏览器 (${browserType}): ${chromePath}`);
 
         // 时区设置
         const env = { ...process.env };

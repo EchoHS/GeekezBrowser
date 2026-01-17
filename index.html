@@ -1090,6 +1090,26 @@
                 </div>
                 <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 10px;"
                     data-i18n="autoFingerprint">* Auto Fingerprint</div>
+                <!-- 浏览器类型选择 -->
+                <div class="form-group">
+                    <label data-i18n="browserTypeLabel" style="font-size:11px; font-weight:bold; opacity:0.8; margin-top:8px; display:block;">🌐 Browser Type</label>
+                    <select id="addBrowserType" class="form-control">
+                        <option value="system">System Chrome</option>
+                        <option value="builtin" selected>Built-in Chrome for Testing</option>
+                        <option value="custom">Custom Path</option>
+                    </select>
+                    <!-- 自定义浏览器路径 -->
+                    <div id="addCustomBrowserPathSection" style="display:none; margin-top:10px;">
+                        <div style="display:flex; gap:5px;">
+                            <input type="text" id="addCustomBrowserPath" class="form-control"
+                                placeholder="Select Chrome executable path"
+                                data-i18n-placeholder="browserPathPlaceholder" readonly>
+                            <button type="button" id="btnBrowseAddChrome" class="btn btn-secondary"
+                                style="white-space:nowrap;" data-i18n="browserBrowseBtn">Browse...</button>
+                        </div>
+                    </div>
+                    <small id="addBrowserPathHint" class="form-text" style="color:#888;">检测中...</small>
+                </div>
             </div>
             <div class="modal-footer"><button class="outline" onclick="closeAddModal()"
                     data-i18n="cancel">Cancel</button><button onclick="saveNewProfile()"
@@ -1146,6 +1166,26 @@
                         <div style="display:flex; gap:5px;"><input type="number" id="editResW"><input type="number"
                                 id="editResH"></div>
                     </div>
+                </div>
+                <!-- 浏览器类型选择 -->
+                <div class="form-group">
+                    <label data-i18n="browserTypeLabel" style="font-size:11px; font-weight:bold; opacity:0.8; margin-top:8px; display:block;">🌐 Browser Type</label>
+                    <select id="editBrowserType" class="form-control">
+                        <option value="system">System Chrome</option>
+                        <option value="builtin">Built-in Chrome for Testing</option>
+                        <option value="custom">Custom Path</option>
+                    </select>
+                    <!-- 自定义浏览器路径 -->
+                    <div id="customBrowserPathSection" style="display:none; margin-top:10px;">
+                        <div style="display:flex; gap:5px;">
+                            <input type="text" id="editCustomBrowserPath" class="form-control"
+                                placeholder="Select Chrome executable path"
+                                data-i18n-placeholder="browserPathPlaceholder" readonly>
+                            <button type="button" id="btnBrowseChrome" class="btn btn-secondary"
+                                style="white-space:nowrap;" data-i18n="browserBrowseBtn">Browse...</button>
+                        </div>
+                    </div>
+                    <small id="browserPathHint" class="form-text" style="color:#888;">检测中...</small>
                 </div>
                 <!-- Remote Debugging Port (conditional) -->
                 <div id="debugPortSection" style="display:none; margin-top:12px;">

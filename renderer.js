@@ -264,6 +264,10 @@ function renderHelpContent() {
 
 function applyLang() {
     document.querySelectorAll('[data-i18n]').forEach(el => { el.innerText = t(el.getAttribute('data-i18n')); });
+    // 处理 placeholder 翻译
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+    });
     document.querySelectorAll('.running-badge').forEach(el => { el.innerText = t('runningStatus'); });
     const themeSel = document.getElementById('themeSelect');
     if (themeSel) { themeSel.options[0].text = t('themeGeek'); themeSel.options[1].text = t('themeLight'); themeSel.options[2].text = t('themeDark'); }
@@ -332,6 +336,7 @@ async function init() {
     window.electronAPI.onProfileStatus(({ id, status }) => {
         const badge = document.getElementById(`status-${id}`);
         if (badge) status === 'running' ? badge.classList.add('active') : badge.classList.remove('active');
+        loadProfiles();
     });
 
     // 核心修复：版本号注入
@@ -520,7 +525,14 @@ async function loadProfiles() {
                         </span>
                     </div>
                 </div>
-                <div class="actions"><button onclick="launch('${p.id}')" class="no-drag">${t('launch')}</button><button class="outline no-drag" onclick="openEditModal('${p.id}')">${t('edit')}</button><button class="danger no-drag" onclick="remove('${p.id}')">${t('delete')}</button></div>
+                <div class="actions">
+                    ${isRunning
+                        ? `<button onclick="closeProfile('${p.id}')" class="danger no-drag">${t('close')}</button>`
+                        : `<button onclick="launch('${p.id}')" class="no-drag">${t('launch')}</button>`
+                    }
+                    <button class="outline no-drag" onclick="openEditModal('${p.id}')">${t('edit')}</button>
+                    <button class="danger no-drag" onclick="remove('${p.id}')">${t('delete')}</button>
+                </div>
             `;
             listEl.appendChild(el);
         });
@@ -532,6 +544,16 @@ async function quickUpdatePreProxy(id, val) {
     const profiles = await window.electronAPI.getProfiles();
     const p = profiles.find(x => x.id === id);
     if (p) { p.preProxyOverride = val; await window.electronAPI.updateProfile(p); }
+}
+
+// 设置浏览器类型选项的翻译
+function applyBrowserTypeOptions(selectId) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    const options = select.querySelectorAll('option');
+    if (options[0]) options[0].text = t('browserTypeSystem');
+    if (options[1]) options[1].text = t('browserTypeBuiltin');
+    if (options[2]) options[2].text = t('browserTypeCustom');
 }
 
 function openAddModal() {
@@ -547,6 +569,36 @@ function openAddModal() {
     // Initialize language dropdown
     initCustomLanguageDropdown('addLanguage', 'addLanguageDropdown');
     document.getElementById('addLanguage').value = 'Auto (System Default)';
+
+    // 初始化浏览器类型
+    const addBrowserTypeSelect = document.getElementById('addBrowserType');
+    applyBrowserTypeOptions('addBrowserType');
+    addBrowserTypeSelect.value = 'builtin';
+    document.getElementById('addCustomBrowserPath').value = '';
+    toggleCustomPathSection('add', 'builtin');
+    updateBrowserPathHint('add', 'builtin', '');
+
+    // 监听浏览器类型变化
+    addBrowserTypeSelect.onchange = function () {
+        const selectedType = this.value;
+        toggleCustomPathSection('add', selectedType);
+        const customPath = document.getElementById('addCustomBrowserPath').value;
+        updateBrowserPathHint('add', selectedType, customPath);
+    };
+
+    // 浏览 Chrome 可执行文件
+    document.getElementById('btnBrowseAddChrome').onclick = async function () {
+        try {
+            const result = await window.electronAPI.selectChromeExecutable();
+            if (result) {
+                document.getElementById('addCustomBrowserPath').value = result;
+                updateBrowserPathHint('add', 'custom', result);
+            }
+        } catch (err) {
+            console.error('[selectChromeExecutable] 选择失败:', err);
+            updateBrowserPathHint('add', 'custom', '');
+        }
+    };
 
     document.getElementById('addModal').style.display = 'flex';
 }
@@ -576,13 +628,28 @@ async function saveNewProfile() {
     const languageInput = document.getElementById('addLanguage').value;
     const language = getLanguageCode(languageInput);
 
+    // 获取浏览器类型
+    const browserType = document.getElementById('addBrowserType').value || 'builtin';
+    const customBrowserPath = document.getElementById('addCustomBrowserPath').value;
+
     const tags = tagsStr.split(/[,，]/).map(s => s.trim()).filter(s => s);
 
     if (!name && proxyStr) { const autoName = getProxyRemark(proxyStr); if (autoName) name = autoName; }
     if (!name || !proxyStr) return showAlert(t('inputReq'));
 
-    // 传递 timezone, city, geolocation, language
-    await window.electronAPI.saveProfile({ name, proxyStr, tags, timezone, city, geolocation, language });
+    // 传递 timezone, city, geolocation, language, browserType
+    const profileData = {
+        name,
+        proxyStr,
+        tags,
+        timezone,
+        city,
+        geolocation,
+        language,
+        browserType,
+        customBrowserPath: browserType === 'custom' ? customBrowserPath : undefined
+    };
+    await window.electronAPI.saveProfile(profileData);
     closeAddModal(); await loadProfiles();
 }
 
@@ -592,6 +659,17 @@ async function launch(id) {
         const msg = await window.electronAPI.launchProfile(id, watermarkStyle);
         if (msg && msg.includes(':')) showAlert(msg);
     } catch (e) { showAlert('Error: ' + e.message); }
+}
+
+async function closeProfile(id) {
+    try {
+        const result = await window.electronAPI.closeProfile(id);
+        if (!result.success) {
+            showAlert('关闭失败: ' + (result.message || '未知错误'));
+        }
+    } catch (e) {
+        showAlert('Error: ' + e.message);
+    }
 }
 
 function remove(id) {
@@ -639,6 +717,37 @@ async function openEditModal(id) {
         debugPortSection.style.display = 'none';
     }
 
+    // 浏览器类型回填
+    const browserType = p.browserType || 'builtin';
+    const browserTypeSelect = document.getElementById('editBrowserType');
+    applyBrowserTypeOptions('editBrowserType');
+    browserTypeSelect.value = browserType;
+    document.getElementById('editCustomBrowserPath').value = p.customBrowserPath || '';
+    toggleCustomPathSection('edit', browserType);
+    updateBrowserPathHint('edit', browserType, p.customBrowserPath);
+
+    // 监听浏览器类型变化
+    browserTypeSelect.onchange = function () {
+        const selectedType = this.value;
+        toggleCustomPathSection('edit', selectedType);
+        const customPath = document.getElementById('editCustomBrowserPath').value;
+        updateBrowserPathHint('edit', selectedType, customPath);
+    };
+
+    // 浏览 Chrome 可执行文件
+    document.getElementById('btnBrowseChrome').onclick = async function () {
+        try {
+            const result = await window.electronAPI.selectChromeExecutable();
+            if (result) {
+                document.getElementById('editCustomBrowserPath').value = result;
+                updateBrowserPathHint('edit', 'custom', result);
+            }
+        } catch (err) {
+            console.error('[selectChromeExecutable] 选择失败:', err);
+            updateBrowserPathHint('edit', 'custom', '');
+        }
+    };
+
     document.getElementById('editModal').style.display = 'flex';
 }
 function closeEditModal() { document.getElementById('editModal').style.display = 'none'; currentEditId = null; }
@@ -684,6 +793,14 @@ async function saveEditProfile() {
         if (debugPortInput.parentElement.style.display !== 'none') {
             const portValue = debugPortInput.value.trim();
             p.debugPort = portValue ? parseInt(portValue) : null;
+        }
+
+        // 保存浏览器类型
+        p.browserType = document.getElementById('editBrowserType').value || 'system';
+        if (p.browserType === 'custom') {
+            p.customBrowserPath = document.getElementById('editCustomBrowserPath').value;
+        } else {
+            delete p.customBrowserPath;
         }
 
         console.log('[saveEditProfile] Calling updateProfile...');
@@ -1261,4 +1378,57 @@ function initCustomTimezoneDropdown(inputId, dropdownId) {
         }
     });
 }
+
+/**
+ * 切换自定义路径输入框显示/隐藏
+ * @param {string} prefix - 'edit' 或 'add'
+ * @param {string} browserType - 浏览器类型
+ */
+function toggleCustomPathSection(prefix, browserType) {
+    const sectionId = prefix === 'add' ? 'addCustomBrowserPathSection' : 'customBrowserPathSection';
+    const customSection = document.getElementById(sectionId);
+    if (!customSection) {
+        console.warn(`[toggleCustomPathSection] 未找到 ${sectionId}`);
+        return;
+    }
+    customSection.style.display = browserType === 'custom' ? 'block' : 'none';
+}
+
+/**
+ * 更新浏览器路径提示信息
+ * @param {string} prefix - 'edit' 或 'add'
+ * @param {string} browserType - 浏览器类型
+ * @param {string} customPath - 自定义路径
+ */
+async function updateBrowserPathHint(prefix, browserType, customPath) {
+    const hintId = prefix === 'add' ? 'addBrowserPathHint' : 'browserPathHint';
+    const hintElement = document.getElementById(hintId);
+    if (!hintElement) {
+        console.warn(`[updateBrowserPathHint] 未找到 ${hintId}`);
+        return;
+    }
+    hintElement.textContent = t('browserDetecting');
+    hintElement.style.color = '#888';
+    const errorMsg = browserType === 'system'
+        ? t('browserSystemNotFound')
+        : browserType === 'builtin'
+            ? t('browserBuiltinNotFound')
+            : t('browserCustomInvalid');
+
+    try {
+        const detectedPath = await window.electronAPI.detectBrowserPath(browserType, customPath);
+        if (detectedPath) {
+            hintElement.textContent = `${t('browserPathPrefix')}${detectedPath}`;
+            hintElement.style.color = '#28a745'; // 绿色
+        } else {
+            hintElement.textContent = errorMsg;
+            hintElement.style.color = '#dc3545'; // 红色
+        }
+    } catch (err) {
+        console.error('[updateBrowserPathHint] 路径检测失败:', err);
+        hintElement.textContent = errorMsg;
+        hintElement.style.color = '#888';
+    }
+}
+
 init();
