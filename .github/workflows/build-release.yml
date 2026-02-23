@@ -96,6 +96,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+      - name: Rename Windows portable zip
+        if: matrix.os == 'win32'
+        shell: bash
+        run: |
+          for file in dist/*.zip; do
+            if [ -f "$file" ]; then
+              mv "$file" "${file%.zip}-portable.zip"
+            fi
+          done
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
