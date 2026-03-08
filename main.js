@@ -111,6 +111,44 @@ function createApiServer(port) {
     return server;
 }
 
+// 2. 仅用于扩展密码同步的内部服务器 (独立端口 12139，无条件常驻)
+let internalApiServer = null;
+const INTERNAL_API_PORT = 12139;
+
+function createInternalApiServer() {
+    const server = http.createServer(async (req, res) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        res.setHeader('Content-Type', 'application/json');
+
+        if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+
+        const url = new URL(req.url, `http://localhost:${INTERNAL_API_PORT}`);
+
+        if (req.method === 'POST' && url.pathname === '/api/passwords/sync') {
+            let body = await new Promise(resolve => {
+                let data = ''; req.on('data', chunk => data += chunk); req.on('end', () => resolve(data));
+            });
+            try {
+                const data = JSON.parse(body);
+                if (!data.profileId || !data.passwords) {
+                    res.writeHead(400); return res.end(JSON.stringify({ success: false, error: 'profileId and passwords required' }));
+                }
+                const pwFile = require('path').join(DATA_PATH, data.profileId, 'passwords.json');
+                await require('fs-extra').ensureDir(require('path').dirname(pwFile));
+                await writeEncryptedPasswords(pwFile, data.passwords, data.profileId);
+                res.writeHead(200); res.end(JSON.stringify({ success: true, count: data.passwords.length }));
+            } catch (err) {
+                res.writeHead(500); res.end(JSON.stringify({ success: false, error: err.message }));
+            }
+        } else {
+            res.writeHead(404); res.end(JSON.stringify({ success: false, error: 'Endpoint not found' }));
+        }
+    });
+    return server;
+}
+
 // --- Browser data backup helper (module scope) ---
 const backupExcludeDirs = new Set([
     'Cache', 'Code Cache', 'GPUCache', 'DawnWebGPUCache', 'DawnGraphiteCache',
@@ -408,22 +446,6 @@ async function handleApiRequest(method, pathname, body, params) {
         }
     }
 
-    // POST /api/passwords/sync - 扩展同步密码到本地文件
-    if (method === 'POST' && pathname === '/api/passwords/sync') {
-        try {
-            const data = JSON.parse(body);
-            if (!data.profileId || !data.passwords) {
-                return { status: 400, data: { success: false, error: 'profileId and passwords required' } };
-            }
-            const pwFile = path.join(DATA_PATH, data.profileId, 'passwords.json');
-            await fs.ensureDir(path.dirname(pwFile));
-            await writeEncryptedPasswords(pwFile, data.passwords, data.profileId);
-            return { success: true, count: data.passwords.length };
-        } catch (err) {
-            return { status: 500, data: { success: false, error: err.message } };
-        }
-    }
-
     return { status: 404, data: { success: false, error: 'Endpoint not found' } };
 }
 
@@ -549,9 +571,8 @@ async function generateExtension(profilePath, fingerprint, profileName, watermar
     const pwFile = path.join(DATA_PATH, profileId, 'passwords.json');
     const passwords = await readEncryptedPasswords(pwFile, profileId);
 
-    // 获取 API 端口
-    const settings = fs.existsSync(path.join(DATA_PATH, 'settings.json')) ? await fs.readJson(path.join(DATA_PATH, 'settings.json')) : {};
-    const apiPort = settings.apiPort || 12138;
+    // 内部扩展固定使用独立端口 12139
+    const apiPort = 12139;
 
     const manifest = {
         manifest_version: 3,
@@ -940,25 +961,37 @@ document.addEventListener('DOMContentLoaded', async () => {
 app.whenReady().then(async () => {
     createWindow();
 
-    // Auto-start API server internally for GeekEZ Guard sync
+    // Auto-start internal API server explicitly for GeekEZ Guard
     try {
-        if (!apiServerRunning) {
-            let port = 12138;
-            if (fs.existsSync(SETTINGS_FILE)) {
-                const settings = await fs.readJson(SETTINGS_FILE);
-                if (settings.apiPort) port = settings.apiPort;
+        internalApiServer = createInternalApiServer();
+        internalApiServer.listen(INTERNAL_API_PORT, '127.0.0.1', () => {
+            console.log(`🛡️ Internal Guard Server auto-started on http://localhost:${INTERNAL_API_PORT}`);
+        });
+        internalApiServer.on('error', (err) => {
+            console.error('Internal Guard Server failed to start:', err);
+        });
+    } catch (e) {
+        console.error('Failed to auto-start Internal Guard Server:', e);
+    }
+
+    // Auto-start public API server if enabled
+    try {
+        if (fs.existsSync(SETTINGS_FILE)) {
+            const settings = await fs.readJson(SETTINGS_FILE);
+            if (settings.enableApiServer && !apiServerRunning) {
+                const port = settings.apiPort || 12138;
+                apiServer = createApiServer(port);
+                apiServer.listen(port, '127.0.0.1', () => {
+                    apiServerRunning = true;
+                    console.log(`🔌 Public API Server auto-started on http://localhost:${port}`);
+                });
+                apiServer.on('error', (err) => {
+                    console.error('Public API Server failed to auto-start:', err);
+                });
             }
-            apiServer = createApiServer(port);
-            apiServer.listen(port, '127.0.0.1', () => {
-                apiServerRunning = true;
-                console.log(`🔌 API Server auto-started internally on http://localhost:${port}`);
-            });
-            apiServer.on('error', (err) => {
-                console.error('API Server failed to auto-start internally:', err);
-            });
         }
     } catch (e) {
-        console.error('Failed to auto-start API server internally:', e);
+        console.error('Failed to auto-start Public API server:', e);
     }
 
     setTimeout(() => { fs.emptyDir(TRASH_PATH).catch(() => { }); }, 10000);
