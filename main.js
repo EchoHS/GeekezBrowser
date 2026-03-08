@@ -879,12 +879,12 @@ body{width:320px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,s
 .add-form input{width:100%;padding:6px 8px;margin:3px 0;background:#16213e;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-size:12px}
 .add-form button{width:100%;padding:6px;margin-top:6px;background:#e94560;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:500}
 .add-form button:hover{background:#c73450}
-.toggle-add{display:block;width:100%;padding:8px;background:none;border:none;border-top:1px solid #333;color:#e94560;cursor:pointer;font-size:12px}
+.add-pw-btn{display:block;width:100%;padding:8px;background:none;border:none;border-top:1px solid #333;color:#e94560;cursor:pointer;font-size:12px}
 </style></head>
 <body>
 <div class="header"><h1>🔑 GeeKez</h1><span>密码管理</span></div>
 <div class="list" id="list"></div>
-<button class="toggle-add" id="toggleAdd">+ 添加密码</button>
+<button class="add-pw-btn" id="addPwBtn">+ 添加密码</button>
 <div class="add-form" id="addForm" style="display:none">
 <input id="addUrl" placeholder="网址 URL"><input id="addUser" placeholder="用户名"><input id="addPw" type="password" placeholder="密码">
 <button id="addBtn">保存</button>
@@ -897,11 +897,11 @@ body{width:320px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,s
     const popupJs = `
 document.addEventListener('DOMContentLoaded', async () => {
     const list = document.getElementById('list');
-    const toggleAdd = document.getElementById('toggleAdd');
+    const addPwBtn = document.getElementById('addPwBtn');
     const addForm = document.getElementById('addForm');
     const addBtn = document.getElementById('addBtn');
 
-    toggleAdd.addEventListener('click', () => {
+    addPwBtn.addEventListener('click', () => {
         addForm.style.display = addForm.style.display === 'none' ? 'block' : 'none';
     });
 
@@ -1933,7 +1933,7 @@ ipcMain.handle('launch-profile', async (event, profileId, watermarkStyle) => {
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-blink-features=AutomationControlled',
-            '--disable-features=IsolateOrigins,site-per-process',
+            '--disable-features=IsolateOrigins,site-per-process,ExtensionsMenuAccessControl',
             '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
             `--lang=${targetLang}`,
             `--accept-lang=${targetLang}`,
