@@ -1,4 +1,4 @@
-﻿// i18n structure moved to i18n.js and locales/
+// i18n structure moved to i18n.js and locales/
 
 let globalSettings = { preProxies: [], subscriptions: [], mode: 'single', enablePreProxy: false };
 let currentEditId = null;
@@ -220,18 +220,15 @@ function getProxyRemark(link) {
 }
 
 function renderHelpContent() {
-    const manualHTML = curLang === 'en' ?
-        `<div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">1. Create Environment</h4><p style="font-size:14px;">Enter a name and proxy link. The system auto-generates a unique fingerprint with randomized Hardware.</p></div>
+    let manualHTML = '';
+    let aboutHTML = '';
+
+    if (window.curLang === 'en') {
+        manualHTML = `<div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">1. Create Environment</h4><p style="font-size:14px;">Enter a name and proxy link. The system auto-generates a unique fingerprint with randomized Hardware.</p></div>
          <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">2. Launch</h4><p style="font-size:14px;">Click Launch. A green badge indicates active status. Each environment is fully isolated.</p></div>
          <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">3. Pre-Proxy (Optional)</h4><p style="font-size:14px;">Chain proxy for IP hiding. Use TCP protocols for stability.</p></div>
-         <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">4. Best Practices</h4><p style="font-size:14px;">• Use high-quality residential IPs<br>• Keep one account per environment<br>• Avoid frequent switching<br>• Simulate real user behavior</p></div>` :
-        `<div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">1. 新建环境</h4><p style="font-size:14px;">填写名称与代理链接。系统自动生成唯一指纹（硬件随机化）。</p></div>
-         <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">2. 启动环境</h4><p style="font-size:14px;">点击启动，列表中显示绿色运行标签。每个环境完全隔离。</p></div>
-         <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">3. 前置代理（可选）</h4><p style="font-size:14px;">用于隐藏本机IP或链路加速。建议使用TCP协议。</p></div>
-         <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">4. 最佳实践</h4><p style="font-size:14px;">• 使用高质量住宅IP<br>• 一个账号固定一个环境<br>• 避免频繁切换<br>• 模拟真实用户行为</p></div>`;
-
-    const aboutHTML = curLang === 'en' ?
-        `<div style="text-align:center;margin-bottom:24px;padding:20px 0;">
+         <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">4. Best Practices</h4><p style="font-size:14px;">• Use high-quality residential IPs<br>• Keep one account per environment<br>• Avoid frequent switching<br>• Simulate real user behavior</p></div>`;
+        aboutHTML = `<div style="text-align:center;margin-bottom:24px;padding:20px 0;">
             <div style="font-size:28px;font-weight:700;color:var(--text-primary);letter-spacing:1px;">Geek<span style="color:var(--accent);">EZ</span></div>
             <div style="font-size:12px;opacity:0.5;margin-top:4px;">v1.4.0 · Anti-detect Browser</div>
          </div>
@@ -293,8 +290,81 @@ function renderHelpContent() {
             <div style="font-size:18px;margin-bottom:6px;">💬</div>
             <div style="font-size:12px;opacity:0.8;margin-bottom:8px;">Join our QQ Group for support</div>
             <a href="tencent://groupwpa/?subcmd=all&uin=1079216892" title="Click to join QQ Group" style="font-size:16px;font-weight:600;color:var(--accent);letter-spacing:1px;text-decoration:none;">Click to join: 1079216892</a>
-         </div>` :
-        `<div style="text-align:center;margin-bottom:24px;padding:20px 0;">
+         </div>`;
+    } else if (window.curLang === 'vi') {
+        manualHTML = `<div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">1. Tạo Cấu hình</h4><p style="font-size:14px;">Nhập tên và liên kết proxy. Hệ thống sẽ tự động tạo dấu vân tay duy nhất với Phần cứng ngẫu nhiên.</p></div>
+         <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">2. Khởi chạy</h4><p style="font-size:14px;">Nhấn Chạy. Nhãn màu xanh lá biểu thị trạng thái đang hoạt động. Mỗi môi trường hoàn toàn cô lập.</p></div>
+         <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">3. Tiền Proxy (Tùy chọn)</h4><p style="font-size:14px;">Chuỗi proxy để ẩn IP. Sử dụng giao thức TCP để ổn định.</p></div>
+         <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">4. Kinh nghiệm tốt nhất</h4><p style="font-size:14px;">• Sử dụng IP dân cư chất lượng cao<br>• Một tài khoản cho mỗi cấu hình<br>• Tránh chuyển đổi thường xuyên<br>• Mô phỏng hành vi người dùng thật</p></div>`;
+        aboutHTML = `<div style="text-align:center;margin-bottom:24px;padding:20px 0;">
+            <div style="font-size:28px;font-weight:700;color:var(--text-primary);letter-spacing:1px;">Geek<span style="color:var(--accent);">EZ</span></div>
+            <div style="font-size:12px;opacity:0.5;margin-top:4px;">v1.4.0 · Trình duyệt Chống phát hiện</div>
+         </div>
+         
+         <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+            <div style="width:4px;height:18px;background:linear-gradient(180deg, var(--accent), #7c3aed);border-radius:2px;"></div>
+            <h4 style="margin:0;color:var(--text-primary);font-size:14px;font-weight:600;">CÔNG NGHỆ CỐT LÕI</h4>
+         </div>
+         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:24px;">
+            <div style="background:var(--input-bg);padding:12px;border-radius:8px;border:1px solid var(--border);">
+                <div style="font-size:11px;color:var(--accent);font-weight:600;margin-bottom:4px;">🧬 Lõi Chrome Thật</div>
+                <div style="font-size:11px;opacity:0.7;">Chrome Gốc + JS Injection</div>
+            </div>
+            <div style="background:var(--input-bg);padding:12px;border-radius:8px;border:1px solid var(--border);">
+                <div style="font-size:11px;color:var(--accent);font-weight:600;margin-bottom:4px;">🔐 Dấu vân tay Phần cứng</div>
+                <div style="font-size:11px;opacity:0.7;">Ngẫu nhiên hóa CPU/Memory</div>
+            </div>
+            <div style="background:var(--input-bg);padding:12px;border-radius:8px;border:1px solid var(--border);">
+                <div style="font-size:11px;color:var(--accent);font-weight:600;margin-bottom:4px;">🌍 Hơn 60 Ngôn ngữ</div>
+                <div style="font-size:11px;opacity:0.7;">Giả lập Múi giờ & Ngôn ngữ</div>
+            </div>
+            <div style="background:var(--input-bg);padding:12px;border-radius:8px;border:1px solid var(--border);">
+                <div style="font-size:11px;color:var(--accent);font-weight:600;margin-bottom:4px;">⚡ Tăng tốc GPU</div>
+                <div style="font-size:11px;opacity:0.7;">Hiệu năng UI mượt mà</div>
+            </div>
+         </div>
+
+         <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+            <div style="width:4px;height:18px;background:linear-gradient(180deg, #4CAF50, #2196F3);border-radius:2px;"></div>
+            <h4 style="margin:0;color:var(--text-primary);font-size:14px;font-weight:600;">TRẠNG THÁI PHÁT HIỆN</h4>
+         </div>
+         <div style="background:var(--input-bg);padding:14px;border-radius:8px;border:1px solid var(--border);margin-bottom:24px;">
+            <div style="display:flex;flex-wrap:wrap;gap:16px;">
+                <div style="font-size:12px;"><span style="color:#4CAF50;">✓</span> Browserscan Thông qua</div>
+                <div style="font-size:12px;"><span style="color:#4CAF50;">✓</span> Pixelscan Sạch</div>
+                <div style="font-size:12px;"><span style="color:#4CAF50;">✓</span> TLS Fingerprint thật</div>
+                <div style="font-size:12px;"><span style="color:#4CAF50;">✓</span> Minimal API Hook</div>
+            </div>
+         </div>
+
+         <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+            <div style="width:4px;height:18px;background:linear-gradient(180deg, #FF9800, #F44336);border-radius:2px;"></div>
+            <h4 style="margin:0;color:var(--text-primary);font-size:14px;font-weight:600;">ĐỘ TƯƠNG THÍCH NỀN TẢNG</h4>
+         </div>
+         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px;">
+            <span style="background:linear-gradient(135deg, rgba(243,156,18,0.2), rgba(243,156,18,0.1));color:#f39c12;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:500;">Amazon</span>
+            <span style="background:linear-gradient(135deg, rgba(39,174,96,0.2), rgba(39,174,96,0.1));color:#27ae60;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:500;">TikTok</span>
+            <span style="background:linear-gradient(135deg, rgba(41,128,185,0.2), rgba(41,128,185,0.1));color:#2980b9;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:500;">Facebook</span>
+            <span style="background:linear-gradient(135deg, rgba(230,126,34,0.2), rgba(230,126,34,0.1));color:#e67e22;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:500;">Shopee</span>
+            <span style="background:linear-gradient(135deg, rgba(191,0,0,0.2), rgba(191,0,0,0.1));color:#bf0000;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:500;">Rakuten</span>
+            <span style="background:linear-gradient(135deg, rgba(241,196,15,0.2), rgba(241,196,15,0.1));color:#f1c40f;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:500;">Mercado</span>
+         </div>
+
+         <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+            <div style="width:4px;height:18px;background:linear-gradient(180deg, #9C27B0, #E91E63);border-radius:2px;"></div>
+            <h4 style="margin:0;color:var(--text-primary);font-size:14px;font-weight:600;">CỘNG ĐỒNG</h4>
+         </div>
+         <div style="background:linear-gradient(135deg, var(--input-bg), var(--card-bg));padding:16px;border-radius:8px;border:1px solid var(--border);text-align:center;">
+            <div style="font-size:18px;margin-bottom:6px;">💬</div>
+            <div style="font-size:12px;opacity:0.8;margin-bottom:8px;">Tham gia nhóm QQ để được hỗ trợ</div>
+            <a href="tencent://groupwpa/?subcmd=all&uin=1079216892" title="Click to join QQ Group" style="font-size:16px;font-weight:600;color:var(--accent);letter-spacing:1px;text-decoration:none;">Tham gia ngay: 1079216892</a>
+         </div>`;
+    } else {
+        manualHTML = `<div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">1. 新建环境</h4><p style="font-size:14px;">填写名称与代理链接。系统自动生成唯一指纹（硬件随机化）。</p></div>
+         <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">2. 启动环境</h4><p style="font-size:14px;">点击启动，列表中显示绿色运行标签。每个环境完全隔离。</p></div>
+         <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">3. 前置代理（可选）</h4><p style="font-size:14px;">用于隐藏本机IP或链路加速。建议使用TCP协议。</p></div>
+         <div style="margin-bottom:25px;"><h4 style="color:var(--accent);margin-bottom:8px;">4. 最佳实践</h4><p style="font-size:14px;">• 使用高质量住宅IP<br>• 一个账号固定一个环境<br>• 避免频繁切换<br>• 模拟真实用户行为</p></div>`;
+        aboutHTML = `<div style="text-align:center;margin-bottom:24px;padding:20px 0;">
             <div style="font-size:28px;font-weight:700;color:var(--text-primary);letter-spacing:1px;">Geek<span style="color:var(--accent);">EZ</span></div>
             <div style="font-size:12px;opacity:0.5;margin-top:4px;">v1.4.0 · 指纹浏览器</div>
          </div>
@@ -357,6 +427,7 @@ function renderHelpContent() {
             <div style="font-size:12px;opacity:0.8;margin-bottom:8px;">加入 QQ 群获取支持与交流</div>
             <a href="tencent://groupwpa/?subcmd=all&uin=1079216892" title="点击加入QQ群" style="font-size:16px;font-weight:600;color:var(--accent);letter-spacing:1px;text-decoration:none;">点击加入：1079216892</a>
          </div>`;
+    }
 
     const manualEl = document.getElementById('help-manual');
     const aboutEl = document.getElementById('help-about');
@@ -369,12 +440,22 @@ function applyLang() {
     document.querySelectorAll('.running-badge').forEach(el => { el.innerText = t('runningStatus'); });
     const themeSel = document.getElementById('themeSelect');
     if (themeSel) { themeSel.options[0].text = t('themeGeek'); themeSel.options[1].text = t('themeLight'); themeSel.options[2].text = t('themeDark'); }
+    
+    // Update language button label
+    const langBtn = document.querySelector('.lang-btn');
+    if (langBtn) {
+        langBtn.innerText = curLang.toUpperCase();
+    }
+
     renderHelpContent();
     updateToolbar(); loadProfiles(); renderGroupTabs();
 }
 
 function toggleLang() {
-    curLang = curLang === 'cn' ? 'en' : 'cn';
+    if (curLang === 'cn') curLang = 'en';
+    else if (curLang === 'en') curLang = 'vi';
+    else curLang = 'cn';
+    
     localStorage.setItem('geekez_lang', curLang);
     applyLang();
 }
@@ -644,7 +725,7 @@ async function loadProfiles() {
 
         if (filtered.length === 0) {
             const isSearch = searchText.length > 0;
-            const msg = isSearch ? "No Search Results" : t('emptyStateMsg');
+            const msg = isSearch ? t('noSearchResults') : t('emptyStateMsg');
             listEl.innerHTML = `<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg><div class="empty-state-text">${msg}</div></div>`;
             return;
         }
@@ -752,24 +833,26 @@ async function saveNewProfile() {
     // 分割多行代理链接
     const proxyLines = proxyText.split('\n').map(l => l.trim()).filter(l => l);
 
-    if (proxyLines.length === 0) {
+    if (!nameBase && proxyLines.length === 0) {
         return showAlert(t('inputReq'));
     }
 
     // 批量创建环境
     let createdCount = 0;
-    for (let i = 0; i < proxyLines.length; i++) {
-        const proxyStr = proxyLines[i];
+    const itemsToCreate = proxyLines.length > 0 ? proxyLines : [null]; 
+
+    for (let i = 0; i < itemsToCreate.length; i++) {
+        const proxyStr = itemsToCreate[i] || '';
         let name;
 
         if (!nameBase) {
             // 无名称输入，使用代理备注
             name = getProxyRemark(proxyStr) || `Profile-${String(i + 1).padStart(2, '0')}`;
-        } else if (proxyLines.length === 1) {
-            // 单个代理，使用输入名称
+        } else if (itemsToCreate.length === 1) {
+            // 单个代理/无代理，使用输入名称
             name = nameBase;
         } else {
-            // 多个代理，添加序号
+            // 多个代理，自动编号
             name = `${nameBase}-${String(i + 1).padStart(2, '0')}`;
         }
 

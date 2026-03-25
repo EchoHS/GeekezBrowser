@@ -27,7 +27,7 @@ window.zhCN = {
     qsOn: "前置: 开启",
     qsOff: "前置: 关闭",
     confirmDel: "确定要删除该环境吗？",
-    inputReq: "请填写环境名称和代理链接！",
+    inputReq: "请填写环境名称或代理链接！",
     runningStatus: "运行中",
     done: "完成",
     remark: "备注",
@@ -174,5 +174,8 @@ window.zhCN = {
     argsToggle: "⚡ 自定义启动参数",
     argsToggleHint: "启用后可为每个环境添加自定义 Chrome 启动参数",
     apiToggle: "🔌 API 服务",
-    apiToggleHint: "启用后可通过 REST API 远程管理环境"
+    apiToggleHint: "启用后可通过 REST API 远程管理环境",
+    noSearchResults: "无搜索结果",
+    timezoneAuto: "自动 (不更改)",
+    languageAuto: "自动 (系统默认)"
 };

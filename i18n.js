@@ -27,7 +27,7 @@ const enTranslations = {
     qsOn: "Pre: ON",
     qsOff: "Pre: OFF",
     confirmDel: "Delete this profile?",
-    inputReq: "Name & Proxy Link required!",
+    inputReq: "Profile Name or Proxy Link required!",
     runningStatus: "RUNNING",
     done: "Done",
     remark: "Remark",
@@ -172,7 +172,10 @@ const enTranslations = {
     argsToggle: "⚡ Custom Launch Args",
     argsToggleHint: "Add custom Chrome launch arguments for each profile",
     apiToggle: "🔌 API Server",
-    apiToggleHint: "Enable REST API for remote profile management"
+    apiToggleHint: "Enable REST API for remote profile management",
+    noSearchResults: "No Search Results",
+    timezoneAuto: "Auto (No Change)",
+    languageAuto: "Auto (System Default)"
 };
 
 // Global i18n Manager
@@ -182,11 +185,17 @@ window.t = function (key) {
     if (window.curLang === 'cn' && window.zhCN && window.zhCN[key]) {
         return window.zhCN[key];
     }
+    if (window.curLang === 'vi' && window.viVN && window.viVN[key]) {
+        return window.viVN[key];
+    }
     return enTranslations[key] || key;
 };
 
 window.toggleLanguage = function () {
-    window.curLang = window.curLang === 'cn' ? 'en' : 'cn';
+    if (window.curLang === 'cn') window.curLang = 'en';
+    else if (window.curLang === 'en') window.curLang = 'vi';
+    else window.curLang = 'cn';
+    
     localStorage.setItem('geekez_lang', window.curLang);
     location.reload();
 };
