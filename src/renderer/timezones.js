@@ -1,4 +1,5 @@
 // Comprehensive IANA Timezone list for dropdown
+// Fix: Export to window for global access (module scope issue)
 const TIMEZONES = [
     "Auto (No Change)",  // 不修改时区，用于需要访问登录页面的环境
     // --- North America ---
@@ -122,5 +123,11 @@ const TIMEZONES = [
     "America/Salt_Lake_City",  // Utah
 ];
 
-if (typeof module !== "undefined") module.exports = TIMEZONES;
-else window.TIMEZONES = TIMEZONES;
+// Export for both CommonJS and browser global
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = TIMEZONES;
+}
+// Fix: Ensure window.TIMEZONES is set even in module context
+if (typeof window !== "undefined") {
+    window.TIMEZONES = TIMEZONES;
+}
