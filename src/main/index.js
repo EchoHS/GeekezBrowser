@@ -12,6 +12,9 @@ const os = require('os');
 const crypto = require('crypto');
 const zlib = require('zlib');
 const { promisify } = require('util');
+const { getChromiumPath: resolveChromiumPathForApp } = require('./chromium-path');
+const { CLOSE_BEHAVIOR, normalizeCloseBehavior, resolveCloseBehavior } = require('./close-behavior');
+const { resolveXrayAssetName } = require('./xray-assets');
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
 const initSqlJs = require('sql.js');
@@ -148,11 +151,6 @@ let apiServerRunning = false;
 let mainWindow = null; // Global reference for API-to-UI communication
 let appTray = null;
 let isAppQuitting = false;
-
-const CLOSE_BEHAVIOR = {
-    TRAY: 'tray',
-    QUIT: 'quit'
-};
 let cachedCloseBehavior = CLOSE_BEHAVIOR.TRAY;
 
 // ============================================================================
@@ -295,10 +293,6 @@ function normalizeTags(rawTags) {
             .filter(Boolean);
     }
     return [];
-}
-
-function normalizeCloseBehavior(rawValue) {
-    return rawValue === CLOSE_BEHAVIOR.QUIT ? CLOSE_BEHAVIOR.QUIT : CLOSE_BEHAVIOR.TRAY;
 }
 
 function sanitizeExtensionStoreId(rawId) {
@@ -1541,26 +1535,13 @@ function forceKill(pid) {
 }
 
 function getChromiumPath() {
-    const basePath = isDev ? path.join(app.getAppPath(), 'resources', 'puppeteer') : path.join(process.resourcesPath, 'puppeteer');
-    if (!fs.existsSync(basePath)) return null;
-    function findFile(dir, filename) {
-        try {
-            const files = fs.readdirSync(dir);
-            for (const file of files) {
-                const fullPath = path.join(dir, file);
-                const stat = fs.statSync(fullPath);
-                if (stat.isDirectory()) { const res = findFile(fullPath, filename); if (res) return res; }
-                else if (file === filename) return fullPath;
-            }
-        } catch (e) { return null; } return null;
-    }
-
-    // macOS: Chrome binary is inside .app/Contents/MacOS/
-    if (process.platform === 'darwin') {
-        return findFile(basePath, 'Google Chrome for Testing');
-    }
-    // Windows
-    return findFile(basePath, 'chrome.exe');
+    return resolveChromiumPathForApp({
+        isDev,
+        appPath: app.getAppPath(),
+        resourcesPath: process.resourcesPath,
+        platform: process.platform,
+        env: process.env
+    });
 }
 
 // Settings management
@@ -1603,6 +1584,10 @@ function readSettingsSync() {
 
 function getCloseBehavior() {
     return normalizeCloseBehavior(cachedCloseBehavior);
+}
+
+function isTrayAvailable() {
+    return !!appTray && (typeof appTray.isDestroyed !== 'function' || !appTray.isDestroyed());
 }
 
 function showMainWindow() {
@@ -1984,7 +1969,11 @@ function createWindow() {
     win.on('close', (event) => {
         if (isAppQuitting) return;
 
-        if (getCloseBehavior() === CLOSE_BEHAVIOR.QUIT) {
+        const effectiveCloseBehavior = resolveCloseBehavior(getCloseBehavior(), {
+            trayAvailable: isTrayAvailable()
+        });
+
+        if (effectiveCloseBehavior === CLOSE_BEHAVIOR.QUIT) {
             event.preventDefault();
             quitApplication();
             return;
@@ -2713,7 +2702,7 @@ ipcMain.handle('test-proxy-latency-batch', async (_e, entries) => {
 });
 ipcMain.handle('set-title-bar-color', (e, colors) => { const win = BrowserWindow.fromWebContents(e.sender); if (win) { if (process.platform === 'win32') try { win.setTitleBarOverlay({ color: colors.bg, symbolColor: colors.symbol }); } catch (e) { } win.setBackgroundColor(colors.bg); } });
 ipcMain.handle('check-app-update', async () => { try { const data = await fetchJson('https://api.github.com/repos/EchoHS/GeekezBrowser/releases/latest'); if (!data || !data.tag_name) return { update: false }; const remote = data.tag_name.replace('v', ''); if (compareVersions(remote, app.getVersion()) > 0) { return { update: true, remote, url: 'https://browser.geekez.net/#downloads', notes: data.body }; } return { update: false }; } catch (e) { return { update: false, error: e.message }; } });
-ipcMain.handle('check-xray-update', async () => { try { const data = await fetchJson('https://api.github.com/repos/XTLS/Xray-core/releases/latest'); if (!data || !data.tag_name) return { update: false }; const remoteVer = data.tag_name; const currentVer = await getLocalXrayVersion(); if (remoteVer !== currentVer) { let assetName = ''; const arch = os.arch(); const platform = os.platform(); if (platform === 'win32') assetName = `Xray-windows-${arch === 'x64' ? '64' : '32'}.zip`; else if (platform === 'darwin') assetName = `Xray-macos-${arch === 'arm64' ? 'arm64-v8a' : '64'}.zip`; else assetName = `Xray-linux-${arch === 'x64' ? '64' : '32'}.zip`; const downloadUrl = `https://gh-proxy.com/https://github.com/XTLS/Xray-core/releases/download/${remoteVer}/${assetName}`; return { update: true, remote: remoteVer.replace(/^v/, ''), downloadUrl }; } return { update: false }; } catch (e) { return { update: false }; } });
+ipcMain.handle('check-xray-update', async () => { try { const data = await fetchJson('https://api.github.com/repos/XTLS/Xray-core/releases/latest'); if (!data || !data.tag_name) return { update: false }; const remoteVer = data.tag_name; const currentVer = await getLocalXrayVersion(); if (remoteVer !== currentVer) { const assetName = resolveXrayAssetName({ platform: os.platform(), arch: os.arch() }); if (!assetName) return { update: false, error: `Unsupported platform/arch: ${os.platform()}-${os.arch()}` }; const downloadUrl = `https://gh-proxy.com/https://github.com/XTLS/Xray-core/releases/download/${remoteVer}/${assetName}`; return { update: true, remote: remoteVer.replace(/^v/, ''), downloadUrl }; } return { update: false }; } catch (e) { return { update: false }; } });
 ipcMain.handle('download-xray-update', async (e, url) => {
     const exeName = process.platform === 'win32' ? 'xray.exe' : 'xray';
     const tempBase = os.tmpdir();

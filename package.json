@@ -6,6 +6,7 @@
   "author": "EchoHS",
   "scripts": {
     "dev": "electron-vite dev",
+    "test": "node --test tests/*.test.js",
     "build": "electron-vite build",
     "postinstall": "node setup.js",
     "build:win": "npm run build && electron-builder --win",
