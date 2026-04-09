@@ -80,6 +80,12 @@
           </select>
         </template>
 
+        <div v-if="settings.enableCustomArgs" class="mt-10">
+          <label class="label-tiny">{{ $t('customArgsLabel') }}</label>
+          <textarea v-model="form.customArgs" rows="2" placeholder="--start-maximized" class="mono-text"></textarea>
+          <div class="hint-text">{{ $t('customArgsHint') }}</div>
+        </div>
+
         <div class="hint-text mt-10">{{ $t('autoFingerprint') }}</div>
       </div>
       <div class="modal-footer">
@@ -107,6 +113,7 @@ const uiStore = useUIStore();
 const profileStore = useProfileStore();
 
 const isSaving = ref(false);
+const settings = ref({});
 const showUaWebglModify = ref(false);
 
 const form = reactive({
@@ -120,6 +127,7 @@ const form = reactive({
   resW: null,
   resH: null,
   geolocation: null,
+  customArgs: '',
   browserVersionPreset: 'none',
   webglProfile: 'none'
 });
@@ -219,6 +227,7 @@ watch(() => uiStore.addModalVisible, async (newVal) => {
       resW: null,
       resH: null,
       geolocation: null,
+      customArgs: '',
       browserVersionPreset: 'none',
       webglProfile: 'none'
     });
@@ -226,9 +235,10 @@ watch(() => uiStore.addModalVisible, async (newVal) => {
     citySearch.value = 'Auto (IP Based)';
     languageSearch.value = 'Auto (System Default)';
     try {
-      const settings = await window.electronAPI.getSettings();
-      showUaWebglModify.value = !!settings?.enableUaWebglModify;
+      settings.value = await window.electronAPI.getSettings();
+      showUaWebglModify.value = !!settings.value?.enableUaWebglModify;
     } catch (e) {
+      settings.value = {};
       showUaWebglModify.value = false;
     }
   }
@@ -283,6 +293,7 @@ async function handleSave() {
         screen,
         uaMode: browserPreset.uaMode,
         preProxyOverride: form.preProxyOverride,
+        customArgs: form.customArgs,
         browserType: browserPreset.browserType,
         browserMajorVersion: browserPreset.browserMajorVersion,
         webglProfile: form.webglProfile
@@ -332,5 +343,10 @@ async function handleSave() {
 
 .gap-5 {
   gap: 5px;
+}
+
+.mono-text {
+  font-family: monospace;
+  font-size: 11px;
 }
 </style>
