@@ -272,7 +272,7 @@ async function handleSave() {
       const screen = (form.resW && form.resH) ? { width: form.resW, height: form.resH } : null;
       const browserPreset = parseBrowserVersionPreset(form.browserVersionPreset);
 
-      await profileStore.createProfile({
+      const payload = {
         name,
         proxyStr,
         tags,
@@ -286,7 +286,11 @@ async function handleSave() {
         browserType: browserPreset.browserType,
         browserMajorVersion: browserPreset.browserMajorVersion,
         webglProfile: form.webglProfile
-      });
+      };
+      // Strip Vue reactive proxies to avoid Electron IPC clone failures for geolocation and similar objects.
+      const safePayload = JSON.parse(JSON.stringify(payload));
+
+      await profileStore.createProfile(safePayload);
       createdCount++;
     }
 
