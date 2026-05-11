@@ -11,6 +11,7 @@ export const useSettingsStore = defineStore('settings', {
         closeBehavior: 'tray',
         apiPort: 12138,
         apiRunning: false,
+        apiStarting: false,
         watermarkStyle: 'enhanced',
         userExtensions: [],
         currentDataPath: '',
@@ -38,9 +39,11 @@ export const useSettingsStore = defineStore('settings', {
                 try {
                     const apiStatus = await settingService.getApiStatus();
                     this.apiRunning = apiStatus ? apiStatus.running : false;
+                    this.apiStarting = false;
                 } catch (e) {
                     console.warn('[SettingsStore] getApiStatus failed:', e);
                     this.apiRunning = false;
+                    this.apiStarting = false;
                 }
 
                 // Load Extensions
@@ -89,11 +92,17 @@ export const useSettingsStore = defineStore('settings', {
             await ipcService.saveSettings(settings);
 
             if (enabled) {
-                const res = await settingService.startApiServer(this.apiPort);
-                this.apiRunning = res.success;
+                this.apiStarting = true;
+                try {
+                    const res = await settingService.startApiServer(this.apiPort);
+                    this.apiRunning = !!res.success;
+                } finally {
+                    this.apiStarting = false;
+                }
             } else {
                 await settingService.stopApiServer();
                 this.apiRunning = false;
+                this.apiStarting = false;
             }
         },
 
@@ -112,8 +121,13 @@ export const useSettingsStore = defineStore('settings', {
 
             if (this.enableApiServer) {
                 await settingService.stopApiServer();
-                const res = await settingService.startApiServer(port);
-                this.apiRunning = res.success;
+                this.apiStarting = true;
+                try {
+                    const res = await settingService.startApiServer(port);
+                    this.apiRunning = !!res.success;
+                } finally {
+                    this.apiStarting = false;
+                }
             }
         },
 

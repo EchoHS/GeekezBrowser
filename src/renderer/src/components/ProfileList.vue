@@ -7,6 +7,7 @@
                     :key="profile.id" 
                     :profile="profile" 
                     :isRunning="profileStore.isRunning(profile.id)"
+                    :isLaunching="profileStore.isLaunching(profile.id)"
                     :isSelected="profileStore.isSelected(profile.id)"
                 />
             </template>

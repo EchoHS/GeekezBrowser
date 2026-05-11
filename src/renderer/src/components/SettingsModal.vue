@@ -237,7 +237,9 @@
                                     <div style="font-size:11px; color:var(--text-secondary); opacity:0.8;"
                                         data-i18n="apiToggleHint">{{ $t('apiToggleHint') }}</div>
                                 </div>
-                                <span v-if="settingsStore.apiRunning"
+                                <span v-if="settingsStore.apiStarting"
+                                    style="font-size:10px; padding:3px 8px; background:rgba(243,156,18,0.18); color:#f39c12; border-radius:10px; font-weight:600;">● {{ $t('apiStarting') }}</span>
+                                <span v-else-if="settingsStore.apiRunning"
                                     style="font-size:10px; padding:3px 8px; background:rgba(76,175,80,0.2); color:#4CAF50; border-radius:10px; font-weight:500;">● Live</span>
                             </label>
 
@@ -248,11 +250,15 @@
                                     <code style="font-size:12px; color:var(--accent);">http://localhost:{{ settingsStore.apiPort }}</code>
                                     <input type="number" v-model.number="tempApiPort" min="1024" max="65535"
                                         style="width:80px; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--input-bg); color:var(--text-primary); font-size:12px;">
-                                    <button class="outline" @click="handleSaveApiPort"
+                                    <button class="outline" @click="handleSaveApiPort" :disabled="settingsStore.apiStarting"
                                         style="padding:6px 14px; font-size:11px;">Apply</button>
                                     <a href="#" @click.prevent="handleOpenApiDocs"
                                         style="font-size:11px; color:var(--accent); margin-left:auto;"
                                         data-i18n="apiDocs">📄 Docs</a>
+                                </div>
+                                <div v-if="settingsStore.apiStarting"
+                                    style="margin-top:10px; font-size:11px; color:var(--text-secondary);">
+                                    {{ $t('apiStartingHint') }}
                                 </div>
                             </div>
 

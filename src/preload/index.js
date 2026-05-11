@@ -18,5 +18,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // API events
     onRefreshProfiles: (callback) => ipcRenderer.on('refresh-profiles', () => callback()),
     onApiLaunchProfile: (callback) => ipcRenderer.on('api-launch-profile', (event, id) => callback(id)),
-    onExtensionInstallProgress: (callback) => ipcRenderer.on('extension-install-progress', (event, payload) => callback(payload))
+    onExtensionInstallProgress: (callback) => ipcRenderer.on('extension-install-progress', (event, payload) => callback(payload)),
+    onProfileLaunchProgress: (callback) => ipcRenderer.on('profile-launch-progress', (event, payload) => callback(payload))
 });

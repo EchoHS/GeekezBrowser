@@ -17,7 +17,8 @@ export const profileService = {
     async launch(id) {
         try {
             const watermarkStyle = localStorage.getItem('geekez_watermark_style') || 'enhanced';
-            const msg = await ipcService.invoke('launch-profile', id, watermarkStyle);
+            const lang = localStorage.getItem('geekez_lang') === 'en' ? 'en' : 'cn';
+            const msg = await ipcService.invoke('launch-profile', id, watermarkStyle, lang);
             return {
                 success: true,
                 message: msg || ''
@@ -56,6 +57,15 @@ export const profileService = {
         } catch (e) {
             console.error('Failed to get running IDs:', e);
             return [];
+        }
+    },
+
+    async getRuntimeState() {
+        try {
+            return await ipcService.invoke('get-profile-runtime-state') || { runningIds: [], launchingIds: [] };
+        } catch (e) {
+            console.error('Failed to get profile runtime state:', e);
+            return { runningIds: [], launchingIds: [] };
         }
     },
 
@@ -123,5 +133,13 @@ export const profileService = {
             return;
         }
         ipcService.on('api-launch-profile', (_event, profileId) => callback(profileId));
+    },
+
+    onLaunchProgress(callback) {
+        if (window.electronAPI && typeof window.electronAPI.onProfileLaunchProgress === 'function') {
+            window.electronAPI.onProfileLaunchProgress(callback);
+            return;
+        }
+        ipcService.on('profile-launch-progress', (_event, payload) => callback(payload));
     }
 };

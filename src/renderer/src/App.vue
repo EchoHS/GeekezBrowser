@@ -89,9 +89,25 @@ onMounted(async () => {
         console.log('[App] Initializing service listeners...');
         profileService.onStatusChange(({ id, status }) => {
             if (window.profileStore) {
-                const idx = window.profileStore.runningIds.indexOf(id);
-                if (status === 'running' && idx === -1) window.profileStore.runningIds.push(id);
-                else if (status === 'stopped' && idx !== -1) window.profileStore.runningIds.splice(idx, 1);
+                const runningIdx = window.profileStore.runningIds.indexOf(id);
+                const launchingIdx = window.profileStore.launchingIds.indexOf(id);
+
+                if (status === 'launching') {
+                    if (launchingIdx === -1) window.profileStore.launchingIds.push(id);
+                    if (runningIdx !== -1) window.profileStore.runningIds.splice(runningIdx, 1);
+                    return;
+                }
+
+                if (status === 'running') {
+                    if (runningIdx === -1) window.profileStore.runningIds.push(id);
+                    if (launchingIdx !== -1) window.profileStore.launchingIds.splice(launchingIdx, 1);
+                    return;
+                }
+
+                if (status === 'stopped') {
+                    if (runningIdx !== -1) window.profileStore.runningIds.splice(runningIdx, 1);
+                    if (launchingIdx !== -1) window.profileStore.launchingIds.splice(launchingIdx, 1);
+                }
             }
         });
 
@@ -106,6 +122,32 @@ onMounted(async () => {
             } catch (e) {
                 console.error('[App] API launch profile failed:', e);
             }
+        });
+
+        profileService.onLaunchProgress((payload) => {
+            if (!payload) return;
+
+            const visible = payload.visible !== false;
+            uiStore.progressModalVisible = visible;
+
+            if (!visible) {
+                uiStore.progressPercent = 0;
+                uiStore.progressMessage = '';
+                uiStore.progressTitle = '';
+                uiStore.progressWarn = '';
+                uiStore.progressStep = 0;
+                uiStore.progressTotalSteps = 0;
+                uiStore.progressProfileName = '';
+                return;
+            }
+
+            uiStore.progressTitle = payload.title || 'Launching Profile';
+            uiStore.progressMessage = payload.message || '...';
+            uiStore.progressPercent = Number.isFinite(payload.percent) ? payload.percent : 0;
+            uiStore.progressWarn = payload.warn || (window.t?.('launchingWarn') || 'Please wait while the environment is starting. Do not close the application.');
+            uiStore.progressStep = Number.isFinite(payload.step) ? payload.step : 0;
+            uiStore.progressTotalSteps = Number.isFinite(payload.totalSteps) ? payload.totalSteps : 0;
+            uiStore.progressProfileName = payload.profileName || '';
         });
         console.log('[App] Initialization completed.');
     } catch (e) {

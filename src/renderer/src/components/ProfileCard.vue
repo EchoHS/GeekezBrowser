@@ -9,7 +9,13 @@
                     @change="toggleSelected"
                 >
                 <h4>{{ profile.name }}</h4>
-                <span :id="`status-${profile.id}`" class="running-badge" :class="{ active: isRunning }">{{ t('runningStatus') }}</span>
+                <span
+                    :id="`status-${profile.id}`"
+                    class="running-badge"
+                    :class="{ active: isRunning, launching: isLaunching }"
+                >
+                    {{ isLaunching ? t('launchingStatus') : t('runningStatus') }}
+                </span>
             </div>
             <div class="profile-meta">
                 <span v-for="tag in profile.tags" :key="tag" class="tag"
@@ -28,7 +34,7 @@
             </div>
         </div>
         <div class="actions">
-            <button class="no-drag" @click="launch">{{ t('launch') }}</button>
+            <button class="no-drag" @click="launch" :disabled="isLaunching">{{ isLaunching ? t('launchingStatus') : t('launch') }}</button>
             <button class="outline no-drag" @click="edit">{{ t('edit') }}</button>
             <button class="danger no-drag" @click="remove">{{ t('delete') }}</button>
         </div>
@@ -50,6 +56,10 @@ const props = defineProps({
         required: true
     },
     isRunning: {
+        type: Boolean,
+        default: false
+    },
+    isLaunching: {
         type: Boolean,
         default: false
     },
@@ -102,9 +112,10 @@ const toggleSelected = () => {
 };
 
 const launch = async () => {
+    if (props.isLaunching) return;
     const res = await profileService.launch(props.profile.id);
     if (!res.success && res.message) {
-        uiStore.showAlert('Error: ' + res.message);
+        uiStore.showAlert(res.message);
     }
 };
 
@@ -126,5 +137,11 @@ const remove = () => {
     height: 14px;
     margin-right: 8px;
     margin-bottom: 0;
+}
+
+:deep(.running-badge.launching) {
+    color: #f39c12;
+    border-color: rgba(243, 156, 18, 0.6);
+    background: rgba(243, 156, 18, 0.12);
 }
 </style>

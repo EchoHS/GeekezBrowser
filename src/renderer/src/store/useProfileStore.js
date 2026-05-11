@@ -6,6 +6,7 @@ export const useProfileStore = defineStore('profile', () => {
     // State
     const profiles = ref([]);
     const runningIds = ref([]);
+    const launchingIds = ref([]);
     const searchText = ref('');
     const selectedTag = ref('');
     const selectedIds = ref([]);
@@ -15,7 +16,9 @@ export const useProfileStore = defineStore('profile', () => {
     const loadProfiles = async () => {
         try {
             profiles.value = await profileService.loadProfiles();
-            runningIds.value = await profileService.getRunningIds();
+            const runtimeState = await profileService.getRuntimeState();
+            runningIds.value = runtimeState?.runningIds || await profileService.getRunningIds();
+            launchingIds.value = runtimeState?.launchingIds || [];
             const profileIdSet = new Set(profiles.value.map(p => p.id));
             selectedIds.value = selectedIds.value.filter(id => profileIdSet.has(id));
         } catch (e) {
@@ -89,6 +92,7 @@ export const useProfileStore = defineStore('profile', () => {
     };
 
     const isRunning = (id) => runningIds.value.includes(id);
+    const isLaunching = (id) => launchingIds.value.includes(id);
 
     const createProfile = async (data) => {
         try {
@@ -123,6 +127,7 @@ export const useProfileStore = defineStore('profile', () => {
     return {
         profiles,
         runningIds,
+        launchingIds,
         searchText,
         selectedTag,
         selectedIds,
@@ -139,6 +144,7 @@ export const useProfileStore = defineStore('profile', () => {
         clearSelection,
         toggleSelectAllFiltered,
         isRunning,
+        isLaunching,
         createProfile,
         updateProfile,
         deleteProfile

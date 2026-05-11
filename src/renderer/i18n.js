@@ -185,6 +185,8 @@ const enTranslations = {
     apiEnableDesc: "Start HTTP server for REST API access",
     apiPort: "API Port:",
     apiRunning: "Running",
+    apiStarting: "Starting",
+    apiStartingHint: "API server is starting. Please wait a moment.",
     apiDocs: "📄 View API Docs",
     apiStarted: "API server started",
     apiStopped: "API server stopped",
@@ -215,7 +217,11 @@ const enTranslations = {
     batchDeleteConfirm: "Delete selected profiles?",
     batchAdd: "Batch Add Nodes",
     modeSwitched: "Proxy mode switched",
-    proxyConfigApplied: "Configuration applied"
+    proxyConfigApplied: "Configuration applied",
+    launchingStatus: "LAUNCHING",
+    launchingProfileTitle: "Launching Profile",
+    launchingWarn: "Please wait while the environment is starting. Do not close the application.",
+    launchingStepLabel: "Progress"
 };
 
 // Global i18n Manager

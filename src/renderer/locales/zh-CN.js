@@ -187,6 +187,8 @@ window.zhCN = {
     apiEnableDesc: "启动 HTTP 服务器以提供 REST API 访问",
     apiPort: "API 端口:",
     apiRunning: "运行中",
+    apiStarting: "启动中",
+    apiStartingHint: "API 服务正在启动，请稍候。",
     apiDocs: "📄 查看 API 文档",
     apiStarted: "API 服务已启动",
     apiStopped: "API 服务已停止",
@@ -217,5 +219,9 @@ window.zhCN = {
     batchDeleteConfirm: "确定删除已选择的环境？",
     batchAdd: "批量添加节点",
     modeSwitched: "代理模式已切换",
-    proxyConfigApplied: "配置已生效"
+    proxyConfigApplied: "配置已生效",
+    launchingStatus: "启动中",
+    launchingProfileTitle: "正在启动环境",
+    launchingWarn: "环境启动中，请稍候，不要关闭软件。",
+    launchingStepLabel: "启动进度"
 };

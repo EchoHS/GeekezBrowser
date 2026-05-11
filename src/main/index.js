@@ -147,6 +147,7 @@ const EXTENSION_STORE_CATALOG = [
 ];
 
 let activeProcesses = {};
+let launchingProfiles = new Set();
 let apiServer = null;
 let apiServerRunning = false;
 let mainWindow = null; // Global reference for API-to-UI communication
@@ -186,7 +187,10 @@ function createApiServer(port) {
         }
 
         try {
-            const result = await handleApiRequest(method, pathname, body, url.searchParams);
+            const result = await handleApiRequest(method, pathname, body, url.searchParams, { req, res });
+            if (result && result.__streamHandled) {
+                return;
+            }
             res.writeHead(result.status || 200);
             res.end(JSON.stringify(result.data || result));
         } catch (err) {
@@ -197,6 +201,168 @@ function createApiServer(port) {
     });
 
     return server;
+}
+
+function resolveApiPreferredLang(params, settings = {}) {
+    const rawLang = String(params?.get('lang') || '').trim().toLowerCase();
+    if (rawLang === 'en') return 'en';
+    if (rawLang === 'cn' || rawLang === 'zh' || rawLang === 'zh-cn') return 'cn';
+    return settings.lang === 'en' ? 'en' : 'cn';
+}
+
+function shouldStreamApiOpenRequest(req, params) {
+    const streamParam = String(params?.get('stream') || '').trim().toLowerCase();
+    if (['0', 'false', 'off', 'json'].includes(streamParam)) return false;
+    if (['1', 'true', 'on', 'text', 'plain'].includes(streamParam)) return true;
+
+    const userAgent = String(req?.headers?.['user-agent'] || '').toLowerCase();
+    if (userAgent.includes('curl/') || userAgent.includes('wget/')) {
+        return true;
+    }
+
+    const accept = String(req?.headers?.accept || '').toLowerCase();
+    return accept.includes('text/plain');
+}
+
+function createCompositeSender(targets = []) {
+    const validTargets = targets.filter(target => target && typeof target.send === 'function');
+    return {
+        send(channel, payload) {
+            for (const target of validTargets) {
+                try {
+                    if (typeof target.isDestroyed === 'function' && target.isDestroyed()) continue;
+                    target.send(channel, payload);
+                } catch (e) { }
+            }
+        },
+        isDestroyed() {
+            if (validTargets.length === 0) return true;
+            return validTargets.every((target) => {
+                try {
+                    return typeof target.isDestroyed === 'function' ? target.isDestroyed() : false;
+                } catch (e) {
+                    return true;
+                }
+            });
+        }
+    };
+}
+
+function createApiOpenStreamSender(req, res, profileName, lang) {
+    let closed = false;
+    let lastLine = '';
+
+    const markClosed = () => {
+        closed = true;
+    };
+
+    req.on('close', markClosed);
+    res.on('close', markClosed);
+    res.on('finish', markClosed);
+
+    const writeLine = (line) => {
+        if (closed || !res.writable || res.writableEnded) return;
+        const normalized = String(line || '').trim();
+        if (!normalized || normalized === lastLine) return;
+        lastLine = normalized;
+        try {
+            res.write(`${normalized}\n`);
+        } catch (e) {
+            closed = true;
+        }
+    };
+
+    const progressPrefix = lang === 'en'
+        ? `${profileName} is starting... `
+        : `${profileName} 环境启动中... `;
+
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    return {
+        send(channel, payload) {
+            if (channel !== 'profile-launch-progress') return;
+            if (!payload || payload.visible === false) return;
+            writeLine(`${progressPrefix}${payload.message || (lang === 'en' ? 'Please wait...' : '请稍候...')}`);
+        },
+        isDestroyed() {
+            return closed;
+        },
+        writeLine,
+        close() {
+            if (!closed && !res.writableEnded) {
+                try {
+                    res.end();
+                } catch (e) { }
+            }
+            closed = true;
+        }
+    };
+}
+
+function getApiLaunchUiSender() {
+    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+        return mainWindow.webContents;
+    }
+    return null;
+}
+
+async function streamApiOpenProfile({ req, res, params, settings, profile, resolveRemoteDebugPortForProfile }) {
+    const lang = resolveApiPreferredLang(params, settings);
+    const profileName = profile.name || profile.id || (lang === 'en' ? 'Profile' : '环境');
+    const streamSender = createApiOpenStreamSender(req, res, profileName, lang);
+    const uiSender = getApiLaunchUiSender();
+    const sender = createCompositeSender(uiSender ? [uiSender, streamSender] : [streamSender]);
+
+    try {
+        if (activeProcesses[profile.id]) {
+            streamSender.writeLine(lang === 'en'
+                ? `${profileName} is already running.`
+                : `${profileName} 已在运行中。`);
+            const runningPort = await resolveRemoteDebugPortForProfile(profile.id, profile.debugPort);
+            if (runningPort) {
+                streamSender.writeLine(lang === 'en'
+                    ? `Remote debugging port: ${runningPort}`
+                    : `远程调试端口：${runningPort}`);
+            }
+            streamSender.close();
+            return { __streamHandled: true };
+        }
+
+        const launchMessage = await launchProfileHandler(
+            { sender },
+            profile.id,
+            settings.watermarkStyle || 'enhanced',
+            lang
+        );
+
+        streamSender.writeLine(lang === 'en'
+            ? `${profileName} started successfully.`
+            : `${profileName} 启动成功。`);
+        if (launchMessage) {
+            streamSender.writeLine(lang === 'en'
+                ? `Launch note: ${launchMessage}`
+                : `启动提示：${launchMessage}`);
+        }
+
+        const launchedPort = await resolveRemoteDebugPortForProfile(profile.id, profile.debugPort);
+        if (launchedPort) {
+            streamSender.writeLine(lang === 'en'
+                ? `Remote debugging port: ${launchedPort}`
+                : `远程调试端口：${launchedPort}`);
+        }
+    } catch (err) {
+        streamSender.writeLine(lang === 'en'
+            ? `${profileName} failed to start: ${err.message || err}`
+            : `${profileName} 启动失败：${err.message || err}`);
+    } finally {
+        streamSender.close();
+    }
+
+    return { __streamHandled: true };
 }
 
 // 2. 仅用于扩展密码同步的内部服务器 (独立端口 12139，无条件常驻)
@@ -910,6 +1076,7 @@ function normalizeSettingsSnapshot(settings) {
     if (!Array.isArray(nextSettings.preProxies)) nextSettings.preProxies = [];
     if (!Array.isArray(nextSettings.subscriptions)) nextSettings.subscriptions = [];
     if (!['single', 'balance', 'failover'].includes(nextSettings.mode)) nextSettings.mode = 'single';
+    nextSettings.lang = nextSettings.lang === 'en' ? 'en' : 'cn';
     nextSettings.enablePreProxy = !!nextSettings.enablePreProxy;
     nextSettings.notify = !!nextSettings.notify;
     nextSettings.userExtensions = normalizeUserExtensions(nextSettings.userExtensions || []);
@@ -1206,7 +1373,7 @@ async function buildProfileFromInput(rawData, profiles, settings, existingProfil
 
 // --- Chrome 密码解密辅助函数 ---
 // 解密 Chrome 主密钥 (平台相关)
-async function handleApiRequest(method, pathname, body, params) {
+async function handleApiRequest(method, pathname, body, params, context = {}) {
     let profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
     const settings = fs.existsSync(SETTINGS_FILE) ? await fs.readJson(SETTINGS_FILE) : {};
 
@@ -1294,6 +1461,16 @@ async function handleApiRequest(method, pathname, body, params) {
     if (method === 'GET' && openMatch) {
         const profile = findProfile(decodeURIComponent(openMatch[1]));
         if (!profile) return { status: 404, data: { success: false, error: 'Profile not found' } };
+        if (shouldStreamApiOpenRequest(context.req, params) && context.req && context.res) {
+            return await streamApiOpenProfile({
+                req: context.req,
+                res: context.res,
+                params,
+                settings,
+                profile,
+                resolveRemoteDebugPortForProfile
+            });
+        }
         if (activeProcesses[profile.id]) {
             const runningPort = await resolveRemoteDebugPortForProfile(profile.id, profile.debugPort);
             const runningPayload = {
@@ -1307,15 +1484,17 @@ async function handleApiRequest(method, pathname, body, params) {
             }
             return runningPayload;
         }
-        const launchEvent = (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed())
-            ? { sender: mainWindow.webContents }
+        const lang = resolveApiPreferredLang(params, settings);
+        const uiSender = getApiLaunchUiSender();
+        const launchEvent = uiSender
+            ? { sender: uiSender }
             : {
                 sender: {
                     send: () => { },
                     isDestroyed: () => true
                 }
             };
-        const launchMessage = await launchProfileHandler(launchEvent, profile.id, settings.watermarkStyle || 'enhanced');
+        const launchMessage = await launchProfileHandler(launchEvent, profile.id, settings.watermarkStyle || 'enhanced', lang);
         const launchedPort = await resolveRemoteDebugPortForProfile(profile.id, profile.debugPort);
         const launchedPayload = {
             success: true,
@@ -1622,6 +1801,14 @@ function getProfileLaunchEventSender() {
     };
 }
 
+function emitProfileLaunchProgress(sender, payload) {
+    try {
+        if (!sender || typeof sender.send !== 'function') return;
+        if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) return;
+        sender.send('profile-launch-progress', payload);
+    } catch (e) { }
+}
+
 async function focusRunningProfileWindow(profileId) {
     const proc = activeProcesses[profileId];
     if (!proc || !proc.browser) return false;
@@ -1758,10 +1945,16 @@ async function launchOrFocusProfileFromTray(profileId) {
 async function buildTrayMenuTemplate() {
     const profiles = await readAllProfilesSafe();
     const runningIds = new Set(Object.keys(activeProcesses));
+    const launchingIds = new Set(Array.from(launchingProfiles));
+    const lang = readSettingsSync().lang === 'en' ? 'en' : 'cn';
 
     const createProfileMenuItem = (profile) => ({
-        label: `${runningIds.has(profile.id) ? '🟢 ' : ''}${profile.name || profile.id}`,
+        label: `${runningIds.has(profile.id) ? '🟢 ' : (launchingIds.has(profile.id) ? '🟡 ' : '')}${profile.name || profile.id}`,
         click: () => {
+            if (launchingIds.has(profile.id)) {
+                showMainWindow();
+                return;
+            }
             launchOrFocusProfileFromTray(profile.id).catch(() => { });
         }
     });
@@ -1784,20 +1977,40 @@ async function buildTrayMenuTemplate() {
     }));
 
     const runningProfiles = profiles.filter(profile => runningIds.has(profile.id));
-    const runningMenu = runningProfiles.length > 0
-        ? [
-            {
-                label: '关闭所有环境',
-                click: async () => {
-                    const confirmed = await confirmStopAllRunningProfilesFromTray();
-                    if (!confirmed) return;
-                    stopAllRunningProfilesFromTray().catch(() => { });
-                }
-            },
-            { type: 'separator' },
-            ...runningProfiles.map(createProfileMenuItem)
-        ]
-        : [{ label: '暂无已启动环境', enabled: false }];
+    const launchingProfilesList = profiles.filter(profile => launchingIds.has(profile.id));
+    const runningMenu = [];
+    if (runningProfiles.length > 0) {
+        runningMenu.push({
+            label: lang === 'en' ? 'Stop all running profiles' : '关闭全部运行中环境',
+            click: async () => {
+                const confirmed = await confirmStopAllRunningProfilesFromTray();
+                if (!confirmed) return;
+                stopAllRunningProfilesFromTray().catch(() => { });
+            }
+        });
+    }
+    if (launchingProfilesList.length > 0) {
+        if (runningMenu.length > 0) runningMenu.push({ type: 'separator' });
+        runningMenu.push({
+            label: lang === 'en' ? 'Starting Profiles' : '启动中环境',
+            enabled: false
+        });
+        runningMenu.push(...launchingProfilesList.map(createProfileMenuItem));
+    }
+    if (runningProfiles.length > 0) {
+        if (runningMenu.length > 0) runningMenu.push({ type: 'separator' });
+        runningMenu.push({
+            label: lang === 'en' ? 'Running Profiles' : '运行中环境',
+            enabled: false
+        });
+        runningMenu.push(...runningProfiles.map(createProfileMenuItem));
+    }
+    if (runningMenu.length === 0) {
+        runningMenu.push({
+            label: lang === 'en' ? 'No active profiles' : '暂无活动环境',
+            enabled: false
+        });
+    }
 
     return [
         {
@@ -1810,7 +2023,9 @@ async function buildTrayMenuTemplate() {
             submenu: groupedMenus
         },
         {
-            label: '已启动环境列表',
+            label: lang === 'en'
+                ? `Profile Status (${launchingProfilesList.length} starting / ${runningProfiles.length} running)`
+                : `环境状态（${launchingProfilesList.length} 启动中 / ${runningProfiles.length} 运行中）`,
             submenu: runningMenu
         },
         { type: 'separator' },
@@ -1910,11 +2125,32 @@ function resolveWindowIconPath() {
     return undefined;
 }
 
+function buildTrayTooltip() {
+    const lang = readSettingsSync().lang === 'en' ? 'en' : 'cn';
+    const launchingCount = launchingProfiles.size;
+    const runningCount = Object.keys(activeProcesses).length;
+
+    if (launchingCount > 0) {
+        return lang === 'en'
+            ? `GeekEZ Browser · ${launchingCount} starting · ${runningCount} running`
+            : `GeekEZ Browser · ${launchingCount} 个启动中 · ${runningCount} 个运行中`;
+    }
+
+    if (runningCount > 0) {
+        return lang === 'en'
+            ? `GeekEZ Browser · ${runningCount} running`
+            : `GeekEZ Browser · ${runningCount} 个运行中`;
+    }
+
+    return 'GeekEZ Browser';
+}
+
 async function refreshTrayMenu(popUp = false) {
     const trayDestroyed = !appTray || (typeof appTray.isDestroyed === 'function' && appTray.isDestroyed());
     if (trayDestroyed) return;
     const template = await buildTrayMenuTemplate();
     const menu = Menu.buildFromTemplate(template);
+    appTray.setToolTip(buildTrayTooltip());
     appTray.setContextMenu(menu);
     if (popUp) {
         appTray.popUpContextMenu(menu);
@@ -1926,7 +2162,7 @@ async function createTray() {
 
     const trayImage = await resolveTrayIconImage();
     appTray = new Tray(trayImage);
-    appTray.setToolTip('GeekEZ Browser');
+    appTray.setToolTip(buildTrayTooltip());
     await refreshTrayMenu();
 
     appTray.on('click', () => {
@@ -2521,6 +2757,75 @@ async function waitForLocalPortReady(port, timeoutMs = 1500) {
     return false;
 }
 
+function readFileTailSafe(filePath, maxLength = 500) {
+    try {
+        if (!filePath || !fs.existsSync(filePath)) return '';
+        const content = fs.readFileSync(filePath, 'utf8');
+        if (!content) return '';
+        return content.length > maxLength ? content.slice(-maxLength) : content;
+    } catch (e) {
+        return '';
+    }
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createProxyStartupError(profileName, reason, xrayLogPath, lang = 'cn') {
+    const displayName = profileName || '当前环境';
+    const summary = lang === 'en'
+        ? `${displayName} proxy failed to start. Please check whether the proxy is available or try restarting the profile.`
+        : `${displayName}代理启动失败，请检查代理是否可用或尝试重启环境。`;
+    const logTail = readFileTailSafe(xrayLogPath, 500).trim();
+    const extraReason = String(reason || '').trim();
+
+    if (logTail) {
+        console.error(`[Xray Launch Failed] ${displayName}: ${extraReason || 'unknown'}\n${logTail}`);
+    } else {
+        console.error(`[Xray Launch Failed] ${displayName}: ${extraReason || 'unknown'}`);
+    }
+
+    const err = new Error(summary);
+    err.code = 'XRAY_STARTUP_FAILED';
+    err.detail = extraReason;
+    return err;
+}
+
+function createPreProxyStartupError(profileName, preProxyRemark, reason, lang = 'cn') {
+    const displayName = profileName || '当前环境';
+    const nodeLabel = preProxyRemark ? `[${preProxyRemark}]` : '';
+    const summary = lang === 'en'
+        ? `${displayName} pre-proxy ${nodeLabel} is unavailable. Please check the pre-proxy node or disable pre-proxy and try again.`
+        : `${displayName}前置代理${nodeLabel}不可用，请检查前置代理节点或关闭前置代理后重试。`;
+    const err = new Error(summary);
+    err.code = 'PRE_PROXY_UNAVAILABLE';
+    err.detail = String(reason || '').trim();
+    return err;
+}
+
+async function waitForSocksProxyUsable(socksPort, timeoutMs = 4500, connectTimeoutMs = 1200, processRef = null) {
+    const start = Date.now();
+    let lastMsg = 'Proxy not ready';
+
+    while (Date.now() - start < timeoutMs) {
+        if (processRef && processRef.exitCode !== null) {
+            return {
+                success: false,
+                msg: `xray exited before proxy became usable (code: ${processRef.exitCode})`
+            };
+        }
+
+        const result = await measureSocksConnectLatency(socksPort, connectTimeoutMs);
+        if (result.success) return result;
+
+        lastMsg = result?.msg || lastMsg;
+        await sleep(200);
+    }
+
+    return { success: false, msg: lastMsg };
+}
+
 async function measureSocksConnectLatency(socksPort, timeoutMs = 4000) {
     const targets = [
         { host: 'cp.cloudflare.com', port: 443, servername: 'cp.cloudflare.com' },
@@ -2766,6 +3071,10 @@ ipcMain.handle('download-xray-update', async (e, url) => {
     }
 });
 ipcMain.handle('get-running-ids', () => Object.keys(activeProcesses));
+ipcMain.handle('get-profile-runtime-state', () => ({
+    runningIds: Object.keys(activeProcesses),
+    launchingIds: Array.from(launchingProfiles)
+}));
 ipcMain.handle('get-profiles', async () => { if (!fs.existsSync(PROFILES_FILE)) return []; return fs.readJson(PROFILES_FILE); });
 ipcMain.handle('update-profile', async (event, updatedProfile) => {
     const profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
@@ -3688,8 +3997,37 @@ ipcMain.handle('export-data', async (e, type) => {
 });
 
 // --- 核心启动逻辑 ---
-const launchProfileHandler = async (event, profileId, watermarkStyle) => {
+const launchProfileHandler = async (event, profileId, watermarkStyle, preferredLang) => {
     const sender = event.sender;
+    const progressTitle = preferredLang === 'en' ? 'Launching Profile' : '正在启动环境';
+    const progressWarn = preferredLang === 'en'
+        ? 'Please wait while the environment starts. Do not close the application.'
+        : '环境启动中，请稍候，不要关闭软件。';
+    const totalProgressSteps = 10;
+    const updateLaunchProgress = (percent, message, visible = true, extra = {}) => {
+        emitProfileLaunchProgress(sender, {
+            visible,
+            percent,
+            title: progressTitle,
+            message,
+            warn: progressWarn,
+            profileId,
+            profileName: extra.profileName || '',
+            step: Number.isFinite(extra.step) ? extra.step : 0,
+            totalSteps: Number.isFinite(extra.totalSteps) ? extra.totalSteps : totalProgressSteps
+        });
+    };
+
+    const markLaunching = async (active) => {
+        if (active) launchingProfiles.add(profileId);
+        else launchingProfiles.delete(profileId);
+        try {
+            if (sender && !(typeof sender.isDestroyed === 'function' && sender.isDestroyed())) {
+                sender.send('profile-status', { id: profileId, status: active ? 'launching' : 'stopped' });
+            }
+        } catch (e) { }
+        refreshTrayMenu().catch(() => { });
+    };
 
     if (activeProcesses[profileId]) {
         const proc = activeProcesses[profileId];
@@ -3721,6 +4059,17 @@ const launchProfileHandler = async (event, profileId, watermarkStyle) => {
         if (activeProcesses[profileId]) return "环境已唤醒";
     }
 
+    if (launchingProfiles.has(profileId)) {
+        return preferredLang === 'en' ? 'Profile is starting' : '环境启动中';
+    }
+
+    await markLaunching(true);
+    updateLaunchProgress(
+        5,
+        preferredLang === 'en' ? 'Loading profile settings...' : '正在读取环境配置...',
+        true,
+        { step: 1 }
+    );
     await new Promise(resolve => setTimeout(resolve, 500));
 
     // Load settings early for userExtensions and remote debugging
@@ -3732,14 +4081,22 @@ const launchProfileHandler = async (event, profileId, watermarkStyle) => {
         mode: 'single',
         enablePreProxy: false
     }));
+    const uiLang = preferredLang === 'en' ? 'en' : (settings.lang === 'en' ? 'en' : 'cn');
 
     const profiles = await fs.readJson(PROFILES_FILE);
     const profileIndex = profiles.findIndex(p => p.id === profileId);
     const profile = profileIndex > -1 ? profiles[profileIndex] : null;
     if (!profile) throw new Error('Profile not found');
+    const progressProfileName = profile.name || profileId;
 
     ensureProxyStrValid(profile.proxyStr);
     profile.fingerprint = normalizeFingerprint(profile.fingerprint || {});
+    updateLaunchProgress(
+        12,
+        preferredLang === 'en' ? 'Validating profile configuration...' : '正在校验环境配置...',
+        true,
+        { step: 2, profileName: progressProfileName }
+    );
 
     // Auto-assign a stable remote debugging port when feature is enabled and no explicit port exists.
     if (settings.enableRemoteDebugging && !normalizeDebugPort(profile.debugPort)) {
@@ -3784,6 +4141,13 @@ const launchProfileHandler = async (event, profileId, watermarkStyle) => {
 
         let localPort = null;
 
+        updateLaunchProgress(
+            20,
+            preferredLang === 'en' ? 'Preparing browser workspace...' : '正在准备浏览器工作区...',
+            true,
+            { step: 3, profileName: progressProfileName }
+        );
+
         try {
             const defaultProfileDir = path.join(userDataDir, 'Default');
             fs.ensureDirSync(defaultProfileDir);
@@ -3801,21 +4165,102 @@ const launchProfileHandler = async (event, profileId, watermarkStyle) => {
         } catch (e) { }
 
         const shouldLaunchXray = (!useDirectNetwork) || !!activePreProxy;
+        let xrayLogPath = null;
         if (shouldLaunchXray) {
+            updateLaunchProgress(
+                32,
+                activePreProxy
+                    ? (preferredLang === 'en' ? 'Starting proxy chain service...' : '正在启动代理链服务...')
+                    : (preferredLang === 'en' ? 'Starting profile proxy service...' : '正在启动环境代理服务...'),
+                true,
+                { step: 4, profileName: progressProfileName }
+            );
             localPort = await getAvailablePort();
             const xrayConfigPath = path.join(profileDir, 'config.json');
-            const xrayLogPath = path.join(profileDir, 'xray_run.log');
+            xrayLogPath = path.join(profileDir, 'xray_run.log');
             const upstreamProxy = useDirectNetwork ? activePreProxy?.url : profile.proxyStr;
             const chainedPreProxy = useDirectNetwork ? null : finalPreProxyConfig;
             const config = generateXrayConfig(upstreamProxy, localPort, chainedPreProxy, profile.fingerprint);
             fs.writeJsonSync(xrayConfigPath, config);
             logFd = fs.openSync(xrayLogPath, 'a');
+            const xrayLaunchStartedAt = Date.now();
             xrayProcess = spawn(BIN_PATH, ['-c', xrayConfigPath], { cwd: BIN_DIR, env: { ...process.env, 'XRAY_LOCATION_ASSET': RESOURCES_BIN }, stdio: ['ignore', logFd, logFd], windowsHide: true });
+            updateLaunchProgress(
+                40,
+                preferredLang === 'en' ? 'Waiting for local proxy port...' : '正在等待本地代理端口就绪...',
+                true,
+                { step: 4, profileName: progressProfileName }
+            );
+            const readyTimeoutMs = 2500;
+            const ready = await waitForLocalPortReady(localPort, readyTimeoutMs);
+            if (!ready) {
+                const exitCode = xrayProcess.exitCode;
+                const reason = exitCode !== null
+                    ? `xray exited before ready (code: ${exitCode})`
+                    : `xray socks port ${localPort} not ready within ${readyTimeoutMs}ms`;
+                throw createProxyStartupError(profile.name, reason, xrayLogPath, uiLang);
+            }
 
-            // 优化：减少等待时间，Xray 通常 300ms 内就能启动
-            await new Promise(resolve => setTimeout(resolve, 300));
+            // Xray may bind the local SOCKS port before the upstream proxy chain is fully usable.
+            // Keep the previous 300ms minimum warm-up window to avoid launching Chromium too early.
+            const remainingWarmupMs = 300 - (Date.now() - xrayLaunchStartedAt);
+            if (remainingWarmupMs > 0) {
+                await new Promise((resolve) => setTimeout(resolve, remainingWarmupMs));
+            }
+
+            updateLaunchProgress(
+                48,
+                activePreProxy
+                    ? (preferredLang === 'en' ? 'Checking proxy chain availability...' : '正在检测代理链可用性...')
+                    : (preferredLang === 'en' ? 'Checking profile proxy availability...' : '正在检测环境代理可用性...'),
+                true,
+                { step: 5, profileName: progressProfileName }
+            );
+            const proxyUsable = await waitForSocksProxyUsable(localPort, 4500, 1200, xrayProcess);
+            if (!proxyUsable.success) {
+                if (activePreProxy?.url) {
+                    const preProxyLabel = activePreProxy.remark || activePreProxy.name || activePreProxy.id || '';
+                    updateLaunchProgress(
+                        56,
+                        preferredLang === 'en'
+                            ? `Checking pre-proxy node${preProxyLabel ? ` [${preProxyLabel}]` : ''}...`
+                            : `正在检测前置代理节点${preProxyLabel ? ` [${preProxyLabel}]` : ''}...`,
+                        true,
+                        { step: 5, profileName: progressProfileName }
+                    );
+                    const preProxyCheck = await runProxyLatencyTest(activePreProxy.url);
+                    if (!preProxyCheck.success) {
+                        throw createPreProxyStartupError(
+                            profile.name,
+                            activePreProxy.remark || activePreProxy.name || '',
+                            preProxyCheck.msg || proxyUsable.msg,
+                            uiLang
+                        );
+                    }
+                }
+
+                throw createProxyStartupError(
+                    profile.name,
+                    proxyUsable.msg || 'proxy chain not usable after startup',
+                    xrayLogPath,
+                    uiLang
+                );
+            }
+        } else {
+            updateLaunchProgress(
+                48,
+                preferredLang === 'en' ? 'Using direct network path...' : '正在使用直连网络...',
+                true,
+                { step: 5, profileName: progressProfileName }
+            );
         }
 
+        updateLaunchProgress(
+            66,
+            preferredLang === 'en' ? 'Preparing fingerprint parameters...' : '正在准备指纹参数...',
+            true,
+            { step: 6, profileName: progressProfileName }
+        );
         // 0. Resolve language override
         const configuredLang = profile.fingerprint?.language;
         const hasLanguageOverride = typeof configuredLang === 'string' && configuredLang && configuredLang !== 'auto';
@@ -3847,6 +4292,12 @@ const launchProfileHandler = async (event, profileId, watermarkStyle) => {
         const extPath = await generateExtension(profileDir, profile.fingerprint, profile.name, style, profileId);
 
         // 2. 获取当前环境需要加载的用户扩展
+        updateLaunchProgress(
+            76,
+            preferredLang === 'en' ? 'Loading browser extensions...' : '正在加载浏览器扩展...',
+            true,
+            { step: 7, profileName: progressProfileName }
+        );
         const userExtensions = getProfileUserExtensions(settings, profileId);
         for (const ext of userExtensions) {
             await patchExtensionInstallBehavior(ext.path).catch(() => { });
@@ -3935,6 +4386,12 @@ const launchProfileHandler = async (event, profileId, watermarkStyle) => {
             }
         }
 
+        updateLaunchProgress(
+            86,
+            preferredLang === 'en' ? 'Launching browser window...' : '正在启动浏览器窗口...',
+            true,
+            { step: 8, profileName: progressProfileName }
+        );
         // 5. 启动浏览器
         const chromePath = getChromiumPath();
         if (!chromePath) {
@@ -3961,6 +4418,13 @@ const launchProfileHandler = async (event, profileId, watermarkStyle) => {
             dumpio: false,
             env: env  // 注入环境变量
         });
+
+        updateLaunchProgress(
+            94,
+            preferredLang === 'en' ? 'Applying runtime settings...' : '正在应用运行时设置...',
+            true,
+            { step: 9, profileName: progressProfileName }
+        );
 
         const shortLang = targetLang.includes('-') ? targetLang.split('-')[0] : targetLang;
         const acceptLanguageHeader = shortLang && shortLang !== targetLang
@@ -4245,6 +4709,14 @@ const launchProfileHandler = async (event, profileId, watermarkStyle) => {
             browser,
             logFd: logFd  // 存储日志文件描述符，用于后续关闭
         };
+        launchingProfiles.delete(profileId);
+        updateLaunchProgress(
+            100,
+            preferredLang === 'en' ? 'Launch complete' : '启动完成',
+            true,
+            { step: 10, profileName: progressProfileName }
+        );
+        setTimeout(() => emitProfileLaunchProgress(sender, { visible: false }), 500);
         sender.send('profile-status', { id: profileId, status: 'running' });
         refreshTrayMenu().catch(() => { });
 
@@ -4319,10 +4791,12 @@ const launchProfileHandler = async (event, profileId, watermarkStyle) => {
             } catch (e) { }
         }
 
+        launchingProfiles.delete(profileId);
         delete activeProcesses[profileId];
         if (!sender.isDestroyed()) {
             sender.send('profile-status', { id: profileId, status: 'stopped' });
         }
+        emitProfileLaunchProgress(sender, { visible: false });
         refreshTrayMenu().catch(() => { });
 
         console.error(err);

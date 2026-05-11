@@ -46,6 +46,9 @@ export const useUIStore = defineStore('ui', () => {
     const progressMessage = ref('');
     const progressTitle = ref('');
     const progressWarn = ref('');
+    const progressStep = ref(0);
+    const progressTotalSteps = ref(0);
+    const progressProfileName = ref('');
     
     // Callbacks for legacy/store logic
     let confirmCallback = null;
@@ -108,6 +111,9 @@ export const useUIStore = defineStore('ui', () => {
         const newLang = lang.value === 'cn' ? 'en' : 'cn';
         lang.value = newLang;
         localStorage.setItem('geekez_lang', newLang);
+        ipcService.getSettings()
+            .then((settings) => ipcService.saveSettings({ ...(settings || {}), lang: newLang }))
+            .catch((e) => console.warn('[UIStore] Failed to persist language setting:', e));
         location.reload();
     };
 
@@ -227,6 +233,9 @@ export const useUIStore = defineStore('ui', () => {
         progressMessage,
         progressTitle,
         progressWarn,
+        progressStep,
+        progressTotalSteps,
+        progressProfileName,
         batchAddProxyModalVisible,
         openPasswordModal,
         submitPassword
