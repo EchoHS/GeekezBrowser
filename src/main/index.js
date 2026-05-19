@@ -2850,6 +2850,129 @@ function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function formatProbeDetail(detail = {}) {
+    const target = detail?.target || 'unknown target';
+    const stage = detail?.stage ? ` at ${detail.stage}` : '';
+    const elapsedMs = Number(detail?.elapsedMs);
+    const elapsed = Number.isFinite(elapsedMs) && elapsedMs > 0 ? ` after ${Math.round(elapsedMs)}ms` : '';
+    const msg = detail?.msg || 'unknown error';
+    return `${target}${stage}: ${msg}${elapsed}`;
+}
+
+function summarizeProbeDetails(details = [], maxCount = 3) {
+    if (!Array.isArray(details) || details.length === 0) return '';
+    return details
+        .slice(0, maxCount)
+        .map((detail) => formatProbeDetail(detail))
+        .join('; ');
+}
+
+const DEFAULT_PROXY_PROBE_TARGETS = [
+    { url: 'https://www.gstatic.com/generate_204', expectedStatus: 204 },
+    { url: 'https://cp.cloudflare.com/generate_204', expectedStatus: 204 },
+    { url: 'https://www.google.com/generate_204', expectedStatus: 204 }
+];
+
+const HARD_PROXY_PROBE_PATTERNS = [
+    /\bECONNRESET\b/i,
+    /\bECONNREFUSED\b/i,
+    /\bENETUNREACH\b/i,
+    /\bEHOSTUNREACH\b/i,
+    /\bECONNABORTED\b/i,
+    /\bEPIPE\b/i,
+    /\bEPROTO\b/i,
+    /\bERR_SSL\b/i,
+    /\bTLSV1_ALERT\b/i,
+    /\bUNEXPECTED_EOF\b/i,
+    /\bHTTP 4\d\d\b/i,
+    /\bHTTP 5\d\d\b/i,
+    /returned HTTP\s+[45]\d\d/i
+];
+
+function normalizeProxyProbeTarget(target) {
+    if (!target) return null;
+    if (typeof target === 'string') {
+        return { url: target, expectedStatus: 204 };
+    }
+    const url = String(target.url || '').trim();
+    if (!url) return null;
+    return {
+        url,
+        expectedStatus: Number.isInteger(target.expectedStatus) ? target.expectedStatus : 204
+    };
+}
+
+function createProbeHttpStatusMessage(target, statusCode) {
+    return `${target.url} returned HTTP ${statusCode}`;
+}
+
+function isWarmupLikeProbeMessage(msg = '') {
+    const text = String(msg || '').trim();
+    if (!text) return false;
+    if (HARD_PROXY_PROBE_PATTERNS.some((pattern) => pattern.test(text))) {
+        return false;
+    }
+    return /\bTIMEOUT\b/i.test(text)
+        || /timed out/i.test(text)
+        || /Proxy not ready/i.test(text)
+        || /No socket/i.test(text)
+        || /Request timeout/i.test(text);
+}
+
+function shouldRetryProxyProbe(details = [], msg = '') {
+    if (Array.isArray(details) && details.length > 0) {
+        let sawRetryableFailure = false;
+        for (const detail of details) {
+            if (!isWarmupLikeProbeMessage(detail?.msg || '')) {
+                return false;
+            }
+            sawRetryableFailure = true;
+        }
+        return sawRetryableFailure;
+    }
+    return isWarmupLikeProbeMessage(msg);
+}
+
+async function startPreProxyHealthCheck(url) {
+    if (!url) return null;
+    try {
+        return await runProxyLatencyTest(url);
+    } catch (err) {
+        return { success: false, msg: err?.message || String(err || 'Unknown error') };
+    }
+}
+
+async function waitForProxyChainReady(socksPort, processRef = null, options = {}) {
+    const fastReadyTimeoutMs = Number.isFinite(options.fastReadyTimeoutMs) ? options.fastReadyTimeoutMs : 2600;
+    const fastProbeTimeoutMs = Number.isFinite(options.fastProbeTimeoutMs) ? options.fastProbeTimeoutMs : 1000;
+    const slowReadyTimeoutMs = Number.isFinite(options.slowReadyTimeoutMs) ? options.slowReadyTimeoutMs : 7000;
+    const slowProbeTimeoutMs = Number.isFinite(options.slowProbeTimeoutMs) ? options.slowProbeTimeoutMs : 2200;
+    const targets = Array.isArray(options.targets) ? options.targets : null;
+
+    const fastResult = await waitForSocksProxyUsable(
+        socksPort,
+        fastReadyTimeoutMs,
+        fastProbeTimeoutMs,
+        processRef,
+        { targets }
+    );
+    if (fastResult.success) {
+        return { ...fastResult, phase: 'fast' };
+    }
+    if (!shouldRetryProxyProbe(fastResult.details, fastResult.msg)) {
+        return { ...fastResult, phase: 'fast' };
+    }
+
+    const slowResult = await waitForSocksProxyUsable(
+        socksPort,
+        slowReadyTimeoutMs,
+        slowProbeTimeoutMs,
+        processRef,
+        { targets }
+    );
+    return { ...slowResult, phase: 'slow' };
+}
+
 function createProxyStartupError(profileName, reason, xrayLogPath, lang = 'cn') {
     const displayName = profileName || '当前环境';
     const summary = lang === 'en'
@@ -2882,95 +3005,136 @@ function createPreProxyStartupError(profileName, preProxyRemark, reason, lang = 
     return err;
 }
 
-async function waitForSocksProxyUsable(socksPort, timeoutMs = 4500, connectTimeoutMs = 1200, processRef = null) {
+async function waitForSocksProxyUsable(socksPort, timeoutMs = 4500, connectTimeoutMs = 1200, processRef = null, options = {}) {
     const start = Date.now();
     let lastMsg = 'Proxy not ready';
+    let lastDetails = [];
+    const probeTargets = Array.isArray(options.targets) && options.targets.length > 0
+        ? options.targets
+        : null;
 
     while (Date.now() - start < timeoutMs) {
         if (processRef && processRef.exitCode !== null) {
             return {
                 success: false,
-                msg: `xray exited before proxy became usable (code: ${processRef.exitCode})`
+                msg: `xray exited before proxy became usable (code: ${processRef.exitCode})`,
+                details: lastDetails
             };
         }
 
-        const result = await measureSocksConnectLatency(socksPort, connectTimeoutMs);
+        const result = await measureSocksConnectLatency(socksPort, connectTimeoutMs, probeTargets);
         if (result.success) return result;
 
         lastMsg = result?.msg || lastMsg;
+        lastDetails = Array.isArray(result?.details) ? result.details : [];
         await sleep(200);
     }
 
-    return { success: false, msg: lastMsg };
+    return { success: false, msg: lastMsg, details: lastDetails };
 }
 
-async function measureSocksConnectLatency(socksPort, timeoutMs = 4000) {
-    const targets = [
-        { host: 'cp.cloudflare.com', port: 443, servername: 'cp.cloudflare.com' },
-        { host: 'www.cloudflare.com', port: 443, servername: 'www.cloudflare.com' },
-        { host: 'www.gstatic.com', port: 443, servername: 'www.gstatic.com' }
-    ];
+function createProbeTimeoutMessage(target, timeoutMs, stage = 'connect') {
+    return `${target.host}:${target.port} ${stage} timeout after ${timeoutMs}ms`;
+}
 
-    let lastError = 'Timeout';
-    for (const target of targets) {
+async function measureSocksConnectLatency(socksPort, timeoutMs = 4000, customTargets = null) {
+    const targets = Array.isArray(customTargets) && customTargets.length > 0
+        ? customTargets.map((target) => normalizeProxyProbeTarget(target)).filter(Boolean)
+        : DEFAULT_PROXY_PROBE_TARGETS.map((target) => ({ ...target }));
+
+    const probeTarget = async (target) => {
         const start = process.hrtime.bigint();
-        let socksSocket = null;
-        let tlsSocket = null;
+        let req = null;
+        let res = null;
         try {
-            const result = await Promise.race([
-                SocksClient.createConnection({
-                    command: 'connect',
-                    proxy: {
-                        host: '127.0.0.1',
-                        port: socksPort,
-                        type: 5
-                    },
-                    destination: {
-                        host: target.host,
-                        port: target.port
-                    }
-                }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), timeoutMs))
-            ]);
-
-            socksSocket = result?.socket || null;
-            if (!socksSocket) throw new Error('No socket');
-
+            const agent = await createSocksProxyAgent(`socks5h://127.0.0.1:${socksPort}`);
+            const targetUrl = new URL(target.url);
             const latency = await new Promise((resolve, reject) => {
-                let settled = false;
-                const finish = (err, value) => {
-                    if (settled) return;
-                    settled = true;
-                    try { tlsSocket?.destroy(); } catch (e) { }
-                    try { socksSocket?.destroy(); } catch (e) { }
-                    if (err) reject(err);
-                    else resolve(value);
-                };
-
-                tlsSocket = tls.connect({
-                    socket: socksSocket,
-                    servername: target.servername || target.host,
-                    rejectUnauthorized: false,
-                    ALPNProtocols: ['http/1.1']
+                req = https.get(targetUrl, {
+                    agent,
+                    headers: {
+                        'User-Agent': 'GeekEZ-Browser/1.0',
+                        'Accept': '*/*',
+                        'Accept-Encoding': 'identity'
+                    }
+                }, (response) => {
+                    res = response;
+                    const statusCode = Number(response.statusCode || 0);
+                    response.resume();
+                    if (statusCode !== target.expectedStatus) {
+                        const err = new Error(createProbeHttpStatusMessage(target, statusCode));
+                        err.stage = 'http';
+                        err.statusCode = statusCode;
+                        reject(err);
+                        return;
+                    }
+                    const requestLatency = Number(process.hrtime.bigint() - start) / 1e6;
+                    resolve(Math.max(1, Math.round(requestLatency)));
                 });
 
-                tlsSocket.once('secureConnect', () => {
-                    const handshakeLatency = Number(process.hrtime.bigint() - start) / 1e6;
-                    finish(null, Math.max(1, Math.round(handshakeLatency)));
+                req.setTimeout(timeoutMs, () => {
+                    const err = new Error(createProbeTimeoutMessage(targetUrl, timeoutMs, 'request'));
+                    err.stage = 'request';
+                    req.destroy(err);
                 });
-                tlsSocket.once('error', (err) => finish(err));
-                tlsSocket.setTimeout(timeoutMs, () => finish(new Error('Timeout')));
+                req.once('error', (err) => {
+                    err.stage = err.stage || 'request';
+                    reject(err);
+                });
             });
 
-            return { success: true, latency };
+            return {
+                success: true,
+                latency,
+                target: targetUrl.host
+            };
         } catch (err) {
-            lastError = err?.code || err?.message || 'Connect failed';
-            try { tlsSocket?.destroy(); } catch (e) { }
-            try { socksSocket?.destroy(); } catch (e) { }
+            return {
+                success: false,
+                target: target?.url || 'unknown target',
+                stage: err?.stage || 'request',
+                msg: err?.code || err?.message || 'Connect failed',
+                elapsedMs: Number(process.hrtime.bigint() - start) / 1e6
+            };
+        } finally {
+            try { res?.destroy(); } catch (e) { }
+            try { req?.destroy(); } catch (e) { }
         }
-    }
+    };
 
-    return { success: false, msg: lastError };
+    return await new Promise((resolve) => {
+        const failures = new Array(targets.length);
+        let failureCount = 0;
+        let settled = false;
+
+        targets.forEach((target, index) => {
+            probeTarget(target).then((result) => {
+                if (settled) return;
+
+                if (result.success) {
+                    settled = true;
+                    resolve({
+                        success: true,
+                        latency: result.latency,
+                        target: result.target
+                    });
+                    return;
+                }
+
+                failures[index] = result;
+                failureCount += 1;
+                if (failureCount === targets.length) {
+                    settled = true;
+                    const details = failures.filter(Boolean);
+                    resolve({
+                        success: false,
+                        msg: summarizeProbeDetails(details, targets.length) || 'Proxy probe failed',
+                        details
+                    });
+                }
+            });
+        });
+    });
 }
 
 async function runProxyLatencyTest(proxyStr) {
@@ -4264,6 +4428,39 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             logFd = fs.openSync(xrayLogPath, 'a');
             const xrayLaunchStartedAt = Date.now();
             xrayProcess = spawn(BIN_PATH, ['-c', xrayConfigPath], { cwd: BIN_DIR, env: { ...process.env, 'XRAY_LOCATION_ASSET': RESOURCES_BIN }, stdio: ['ignore', logFd, logFd], windowsHide: true });
+            const preProxyLabel = activePreProxy?.remark || activePreProxy?.name || activePreProxy?.id || '';
+            const preProxyCheckPromise = activePreProxy?.url
+                ? startPreProxyHealthCheck(activePreProxy.url)
+                : null;
+            const throwPreProxyCheckError = (preProxyCheck) => {
+                updateLaunchProgress(
+                    56,
+                    preferredLang === 'en'
+                        ? `Checking pre-proxy node${preProxyLabel ? ` [${preProxyLabel}]` : ''}...`
+                        : `正在检测前置代理节点${preProxyLabel ? ` [${preProxyLabel}]` : ''}...`,
+                    true,
+                    { step: 5, profileName: progressProfileName }
+                );
+                throw createPreProxyStartupError(
+                    profile.name,
+                    activePreProxy?.remark || activePreProxy?.name || '',
+                    preProxyCheck?.msg || 'pre-proxy unavailable',
+                    uiLang
+                );
+            };
+            const awaitWithPreProxyPriority = async (stepPromise) => {
+                if (!preProxyCheckPromise) return await stepPromise;
+                const taggedStepPromise = Promise.resolve(stepPromise).then((value) => ({ type: 'step', value }));
+                const taggedPreProxyPromise = preProxyCheckPromise.then((result) => ({ type: 'pre', result }));
+                const first = await Promise.race([taggedStepPromise, taggedPreProxyPromise]);
+                if (first.type === 'pre') {
+                    if (!first.result?.success) {
+                        throwPreProxyCheckError(first.result);
+                    }
+                    return await stepPromise;
+                }
+                return first.value;
+            };
             updateLaunchProgress(
                 40,
                 preferredLang === 'en' ? 'Waiting for local proxy port...' : '正在等待本地代理端口就绪...',
@@ -4271,7 +4468,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                 { step: 4, profileName: progressProfileName }
             );
             const readyTimeoutMs = 2500;
-            const ready = await waitForLocalPortReady(localPort, readyTimeoutMs);
+            const ready = await awaitWithPreProxyPriority(waitForLocalPortReady(localPort, readyTimeoutMs));
             if (!ready) {
                 const exitCode = xrayProcess.exitCode;
                 const reason = exitCode !== null
@@ -4281,10 +4478,11 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             }
 
             // Xray may bind the local SOCKS port before the upstream proxy chain is fully usable.
-            // Keep the previous 300ms minimum warm-up window to avoid launching Chromium too early.
-            const remainingWarmupMs = 300 - (Date.now() - xrayLaunchStartedAt);
+            // Chained pre-proxy setups need a bit more warm-up budget before the first probe.
+            const minWarmupMs = activePreProxy ? 1200 : 300;
+            const remainingWarmupMs = minWarmupMs - (Date.now() - xrayLaunchStartedAt);
             if (remainingWarmupMs > 0) {
-                await new Promise((resolve) => setTimeout(resolve, remainingWarmupMs));
+                await awaitWithPreProxyPriority(new Promise((resolve) => setTimeout(resolve, remainingWarmupMs)));
             }
 
             updateLaunchProgress(
@@ -4295,10 +4493,28 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                 true,
                 { step: 5, profileName: progressProfileName }
             );
-            const proxyUsable = await waitForSocksProxyUsable(localPort, 4500, 1200, xrayProcess);
+            const proxyUsable = await awaitWithPreProxyPriority(
+                waitForProxyChainReady(
+                    localPort,
+                    xrayProcess,
+                    activePreProxy?.url
+                        ? {
+                            fastReadyTimeoutMs: 2600,
+                            fastProbeTimeoutMs: 1000,
+                            slowReadyTimeoutMs: 4200,
+                            slowProbeTimeoutMs: 1800
+                        }
+                        : {
+                            fastReadyTimeoutMs: 2200,
+                            fastProbeTimeoutMs: 900,
+                            slowReadyTimeoutMs: 2600,
+                            slowProbeTimeoutMs: 1400
+                        }
+                )
+            );
             if (!proxyUsable.success) {
+                const probeSummary = summarizeProbeDetails(proxyUsable.details, 3);
                 if (activePreProxy?.url) {
-                    const preProxyLabel = activePreProxy.remark || activePreProxy.name || activePreProxy.id || '';
                     updateLaunchProgress(
                         56,
                         preferredLang === 'en'
@@ -4307,20 +4523,17 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                         true,
                         { step: 5, profileName: progressProfileName }
                     );
-                    const preProxyCheck = await runProxyLatencyTest(activePreProxy.url);
+                    const preProxyCheck = preProxyCheckPromise
+                        ? await preProxyCheckPromise
+                        : await startPreProxyHealthCheck(activePreProxy.url);
                     if (!preProxyCheck.success) {
-                        throw createPreProxyStartupError(
-                            profile.name,
-                            activePreProxy.remark || activePreProxy.name || '',
-                            preProxyCheck.msg || proxyUsable.msg,
-                            uiLang
-                        );
+                        throwPreProxyCheckError(preProxyCheck);
                     }
                 }
 
                 throw createProxyStartupError(
                     profile.name,
-                    proxyUsable.msg || 'proxy chain not usable after startup',
+                    probeSummary || proxyUsable.msg || 'proxy chain not usable after startup',
                     xrayLogPath,
                     uiLang
                 );
