@@ -12,6 +12,17 @@
         <label class="label-tiny">{{ $t('tagsLabel') }}</label>
         <input v-model="form.tags" type="text" placeholder="tiktok, fb..." spellcheck="false" autocomplete="off">
 
+        <label class="label-tiny">{{ $t('profileNotesLabel') }}</label>
+        <textarea
+          v-model="form.notes"
+          rows="4"
+          class="profile-notes-textarea"
+          :placeholder="$t('profileNotesPlaceholder')"
+          spellcheck="false"
+          autocomplete="off"
+        ></textarea>
+        <div class="hint-text">{{ $t('profileNotesHint') }}</div>
+
         <label class="label-tiny">{{ $t('timezoneLabel') }}</label>
         <div class="timezone-wrapper">
           <input v-model="timezoneSearch" type="text" placeholder="Type to search or select..." autocomplete="off" @focus="showTimezoneList = true">
@@ -119,6 +130,7 @@ const showUaWebglModify = ref(false);
 const form = reactive({
   name: '',
   tags: '',
+  notes: '',
   proxyStr: '',
   timezone: 'Auto',
   city: 'Auto (IP Based)',
@@ -219,6 +231,7 @@ watch(() => uiStore.addModalVisible, async (newVal) => {
     Object.assign(form, {
       name: '',
       tags: '',
+      notes: '',
       proxyStr: '',
       timezone: 'Auto',
       city: 'Auto (IP Based)',
@@ -286,6 +299,7 @@ async function handleSave() {
         name,
         proxyStr,
         tags,
+        notes: form.notes,
         timezone: form.timezone,
         city: form.city,
         geolocation: form.geolocation,
@@ -352,5 +366,10 @@ async function handleSave() {
 .mono-text {
   font-family: monospace;
   font-size: 11px;
+}
+
+.profile-notes-textarea {
+  min-height: 86px;
+  resize: vertical;
 }
 </style>

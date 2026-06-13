@@ -524,6 +524,11 @@ function normalizeTags(rawTags) {
     return [];
 }
 
+function normalizeProfileNotes(rawNotes) {
+    if (rawNotes === undefined || rawNotes === null) return '';
+    return String(rawNotes).replace(/\r\n/g, '\n');
+}
+
 function sanitizeExtensionStoreId(rawId) {
     const value = String(rawId || '').trim().toLowerCase();
     return /^[a-z]{32}$/.test(value) ? value : '';
@@ -1427,6 +1432,7 @@ async function buildProfileFromInput(rawData, profiles, settings, existingProfil
         name: uniqueName,
         proxyStr,
         tags: normalizeTags(firstDefined(data.tags, existingProfile?.tags, [])),
+        notes: normalizeProfileNotes(firstDefined(data.notes, data.note, data.profileNotes, existingProfile?.notes, existingProfile?.note, existingProfile?.profileNotes, '')),
         fingerprint,
         preProxyOverride: firstDefined(data.preProxyOverride, existingProfile?.preProxyOverride, 'default'),
         debugPort,
@@ -1700,6 +1706,7 @@ async function handleApiRequest(method, pathname, body, params, context = {}) {
                             name,
                             proxyStr: item.proxyStr || '',
                             tags: item.tags || [],
+                            notes: normalizeProfileNotes(firstDefined(item.notes, item.note, item.profileNotes, '')),
                             fingerprint: item.fingerprint || await generateFingerprint({}),
                             createdAt: Date.now()
                         };

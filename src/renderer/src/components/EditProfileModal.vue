@@ -12,6 +12,17 @@
         <label class="label-tiny">{{ $t('tagsLabel') }}</label>
         <input v-model="form.tags" type="text" placeholder="tiktok, fb...">
 
+        <label class="label-tiny">{{ $t('profileNotesLabel') }}</label>
+        <textarea
+          v-model="form.notes"
+          rows="4"
+          class="profile-notes-textarea"
+          :placeholder="$t('profileNotesPlaceholder')"
+          spellcheck="false"
+          autocomplete="off"
+        ></textarea>
+        <div class="hint-text">{{ $t('profileNotesHint') }}</div>
+
         <label class="label-tiny">{{ $t('timezoneLabel') }}</label>
         <div class="timezone-wrapper">
           <input v-model="timezoneSearch" type="text" placeholder="Type to search or select..." autocomplete="off" @focus="showTimezoneList = true">
@@ -119,6 +130,7 @@ const showUaWebglModify = ref(false);
 const form = reactive({
   name: '',
   tags: '',
+  notes: '',
   proxyStr: '',
   timezone: 'Auto',
   city: 'Auto (IP Based)',
@@ -201,6 +213,7 @@ watch(() => uiStore.editModalVisible, async (visible) => {
     form.name = p.name;
     form.proxyStr = p.proxyStr;
     form.tags = (p.tags || []).join(', ');
+    form.notes = p.notes || p.note || p.profileNotes || '';
     form.preProxyOverride = p.preProxyOverride || 'default';
     form.resW = fp.screen?.width || 1920;
     form.resH = fp.screen?.height || 1080;
@@ -278,6 +291,7 @@ async function handleSave() {
       name: form.name,
       proxyStr: form.proxyStr,
       tags: tagsRaw.split(/[,，]/).map(s => s.trim()).filter(s => s),
+      notes: form.notes,
       preProxyOverride: form.preProxyOverride,
       uaMode: browserPreset.uaMode,
       browserType: browserPreset.browserType,
@@ -351,5 +365,10 @@ async function handleSave() {
 .mono-text {
   font-family: monospace;
   font-size: 11px;
+}
+
+.profile-notes-textarea {
+  min-height: 86px;
+  resize: vertical;
 }
 </style>
