@@ -294,6 +294,33 @@ function normalizeLaunchOverrideArgs(input) {
     });
 }
 
+function getLaunchArgValue(args, name) {
+    const normalizedName = String(name || '').replace(/^-+/, '');
+    const equalsPrefix = `--${normalizedName}=`;
+    const spacePrefix = `--${normalizedName} `;
+
+    for (let i = args.length - 1; i >= 0; i--) {
+        const arg = String(args[i] || '').trim();
+        if (arg.startsWith(equalsPrefix)) return arg.slice(equalsPrefix.length).trim();
+        if (arg.startsWith(spacePrefix)) return arg.slice(spacePrefix.length).trim();
+    }
+
+    return '';
+}
+
+function createRuntimeFingerprint(baseFingerprint, launchArgsOverride = []) {
+    const fingerprint = { ...(baseFingerprint || {}) };
+    const userAgentOverride = getLaunchArgValue(launchArgsOverride, 'user-agent');
+
+    if (userAgentOverride) {
+        fingerprint.userAgent = userAgentOverride;
+        delete fingerprint.userAgentMetadata;
+        delete fingerprint.secChUa;
+    }
+
+    return fingerprint;
+}
+
 function resolveApiLaunchOverrideArgs(params) {
     const rawArgs = params?.getAll?.('args') || [];
     return normalizeLaunchOverrideArgs(rawArgs);
@@ -4734,10 +4761,11 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             profile.fingerprint.language = 'auto';
             profile.fingerprint.languages = [];
         }
+        const runtimeFingerprint = createRuntimeFingerprint(profile.fingerprint, launchArgsOverride);
 
         // 1. 生成 GeekEZ Guard 扩展（使用传递的水印样式）
         const style = watermarkStyle || 'enhanced'; // 默认使用增强水印
-        const extPath = await generateExtension(profileDir, profile.fingerprint, profile.name, style, profileId);
+        const extPath = await generateExtension(profileDir, runtimeFingerprint, profile.name, style, profileId);
 
         // 2. 获取当前环境需要加载的用户扩展
         updateLaunchProgress(
@@ -4801,8 +4829,8 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             launchArgs.unshift('--no-proxy-server');
         }
 
-        if (profile.fingerprint?.userAgent) {
-            launchArgs.push(`--user-agent=${profile.fingerprint.userAgent}`);
+        if (runtimeFingerprint?.userAgent && !getLaunchArgValue(launchArgsOverride, 'user-agent')) {
+            launchArgs.push(`--user-agent=${runtimeFingerprint.userAgent}`);
         }
         if (hasLanguageOverride) {
             launchArgs.push(`--lang=${targetLang}`);
@@ -4891,7 +4919,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         const acceptLanguageHeader = shortLang && shortLang !== targetLang
             ? `${targetLang},${shortLang};q=0.9`
             : targetLang;
-        const fingerprintInjectScript = getInjectScript(profile.fingerprint, profile.name, style);
+        const fingerprintInjectScript = getInjectScript(runtimeFingerprint, profile.name, style);
         const watermarkInjectScript = getWatermarkScript(profile.name, style);
         const enableWebglOverride = !!(
             profile.fingerprint?.webglProfile !== 'none' &&
@@ -5048,18 +5076,18 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                     } catch (e) { }
                 }
 
-                if (profile.fingerprint?.userAgent) {
+                if (runtimeFingerprint?.userAgent) {
                     const payload = {
-                        userAgent: profile.fingerprint.userAgent
+                        userAgent: runtimeFingerprint.userAgent
                     };
                     if (hasLanguageOverride) {
                         payload.acceptLanguage = targetLang;
                     }
-                    if (profile.fingerprint?.platform) {
-                        payload.platform = profile.fingerprint.platform;
+                    if (runtimeFingerprint?.platform) {
+                        payload.platform = runtimeFingerprint.platform;
                     }
 
-                    const metadata = profile.fingerprint?.userAgentMetadata;
+                    const metadata = runtimeFingerprint?.userAgentMetadata;
                     if (metadata && typeof metadata === 'object') {
                         const md = {
                             mobile: !!metadata.mobile
