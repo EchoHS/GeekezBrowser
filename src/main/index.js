@@ -16,6 +16,7 @@ const { getChromiumPath: resolveChromiumPathForApp } = require('./chromium-path'
 const { CLOSE_BEHAVIOR, normalizeCloseBehavior, resolveCloseBehavior } = require('./close-behavior');
 const { fetchLatestGitHubReleaseInfo } = require('./release-check');
 const { resolveXrayAssetName } = require('./xray-assets');
+const { createProfileStore } = require('./profile-store');
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
 const initSqlJs = require('sql.js');
@@ -101,6 +102,7 @@ const TRASH_PATH = path.join(app.getPath('userData'), '_Trash_Bin');
 const PROFILES_FILE = path.join(DATA_PATH, 'profiles.json');
 const SETTINGS_FILE = path.join(DATA_PATH, 'settings.json');
 const USER_EXTENSIONS_DIR = path.join(DATA_PATH, '_extensions');
+const profileStore = createProfileStore({ dataPath: DATA_PATH, legacyProfilesFile: PROFILES_FILE });
 
 fs.ensureDirSync(DATA_PATH);
 fs.ensureDirSync(TRASH_PATH);
@@ -1438,8 +1440,90 @@ async function buildProfileFromInput(rawData, profiles, settings, existingProfil
 
 // --- Chrome 密码解密辅助函数 ---
 // 解密 Chrome 主密钥 (平台相关)
+async function createEncryptedFullBackupForProfiles(selectedProfiles, settings, password) {
+    const backupData = {
+        version: 2,
+        createdAt: Date.now(),
+        profiles: selectedProfiles.map(p => ({
+            ...p,
+            fingerprint: cleanFingerprint ? cleanFingerprint(p.fingerprint) : p.fingerprint
+        })),
+        preProxies: settings.preProxies || [],
+        subscriptions: settings.subscriptions || [],
+        browserData: {}
+    };
+
+    const filesToBackup = [
+        'Bookmarks', 'Bookmarks.bak', 'History', 'History-journal',
+        'Favicons', 'Favicons-journal', 'Preferences', 'Secure Preferences',
+        'Top Sites', 'Top Sites-journal', 'Web Data', 'Web Data-journal'
+    ];
+    const chromePath = getChromiumPath();
+
+    for (const profile of selectedProfiles) {
+        const profileDataDir = path.join(DATA_PATH, profile.id, 'browser_data');
+        const defaultDir = path.join(profileDataDir, 'Default');
+        const browserFiles = {};
+
+        if (fs.existsSync(defaultDir)) {
+            for (const fileName of filesToBackup) {
+                const filePath = path.join(defaultDir, fileName);
+                if (fs.existsSync(filePath)) {
+                    try {
+                        const content = await fs.readFile(filePath);
+                        browserFiles[fileName] = content.toString('base64');
+                    } catch (err) {
+                        console.error(`API backup file failed ${fileName}:`, err.message);
+                    }
+                }
+            }
+        }
+
+        if (Object.keys(browserFiles).length > 0) {
+            backupData.browserData[profile.id] = browserFiles;
+        }
+        if (!backupData.browserData[profile.id]) backupData.browserData[profile.id] = {};
+
+        if (fs.existsSync(profileDataDir)) {
+            let browser = null;
+            try {
+                browser = await puppeteer.launch({
+                    headless: 'new',
+                    executablePath: chromePath,
+                    userDataDir: profileDataDir,
+                    args: ['--no-first-run', '--disable-extensions', '--disable-sync', '--disable-gpu'],
+                    defaultViewport: null,
+                    ignoreDefaultArgs: ['--enable-automation'],
+                });
+                const page = (await browser.pages())[0] || await browser.newPage();
+                const client = await page.createCDPSession();
+                const { cookies } = await client.send('Network.getAllCookies');
+                backupData.browserData[profile.id]._cookies = cookies;
+            } catch (err) {
+                console.error(`API cookie export failed (${profile.id}):`, err.message);
+            } finally {
+                if (browser) {
+                    try { await browser.close(); } catch (e) { }
+                }
+            }
+        }
+
+        try {
+            const pwJsonFile = path.join(DATA_PATH, profile.id, 'passwords.json');
+            const passwords = await readEncryptedPasswords(pwJsonFile, profile.id);
+            if (passwords.length > 0) backupData.browserData[profile.id]._passwords = passwords;
+        } catch (err) {
+            console.error(`API password export failed (${profile.id}):`, err.message);
+        }
+    }
+
+    const jsonStr = JSON.stringify(backupData);
+    const compressed = await gzip(Buffer.from(jsonStr, 'utf8'));
+    return encryptData(compressed, password);
+}
+
 async function handleApiRequest(method, pathname, body, params, context = {}) {
-    let profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
+    let profiles = await profileStore.readProfiles();
     const settings = fs.existsSync(SETTINGS_FILE) ? await fs.readJson(SETTINGS_FILE) : {};
 
     // Helper: Find profile by ID or Name
@@ -1453,7 +1537,7 @@ async function handleApiRequest(method, pathname, body, params, context = {}) {
         const fromFallback = normalizeDebugPort(fallbackPort);
         if (fromFallback) return fromFallback;
 
-        const latestProfiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE).catch(() => []) : [];
+        const latestProfiles = await profileStore.readProfiles().catch(() => []);
         const latest = Array.isArray(latestProfiles) ? latestProfiles.find(p => p.id === profileId) : null;
         return normalizeDebugPort(latest?.debugPort);
     };
@@ -1483,9 +1567,12 @@ async function handleApiRequest(method, pathname, body, params, context = {}) {
     // POST /api/profiles - Create with unique name
     if (method === 'POST' && pathname === '/api/profiles') {
         const data = parseApiBody(body);
-        const newProfile = await buildProfileFromInput(data, profiles, settings);
-        profiles.push(newProfile);
-        await fs.writeJson(PROFILES_FILE, profiles);
+        const newProfile = await profileStore.runExclusive(async (repo) => {
+            const currentProfiles = repo.readProfiles();
+            const created = await buildProfileFromInput(data, currentProfiles, settings);
+            repo.upsertProfile(created);
+            return created;
+        });
         notifyUIRefresh(); // Notify UI to refresh
         return {
             success: true,
@@ -1496,27 +1583,37 @@ async function handleApiRequest(method, pathname, body, params, context = {}) {
 
     // PUT /api/profiles/:idOrName - Edit
     if (method === 'PUT' && profileMatch) {
-        const profile = findProfile(decodeURIComponent(profileMatch[1]));
-        if (!profile) return { status: 404, data: { success: false, error: 'Profile not found' } };
-        const idx = profiles.findIndex(p => p.id === profile.id);
         const data = parseApiBody(body);
-        const otherProfiles = profiles.filter(p => p.id !== profile.id);
-        profiles[idx] = await buildProfileFromInput(data, otherProfiles, settings, profile);
-        await fs.writeJson(PROFILES_FILE, profiles);
+        const idOrName = decodeURIComponent(profileMatch[1]);
+        const updated = await profileStore.runExclusive(async (repo) => {
+            const currentProfiles = repo.readProfiles();
+            const profile = currentProfiles.find(p => p.id === idOrName || p.name === idOrName);
+            if (!profile) return null;
+            const otherProfiles = currentProfiles.filter(p => p.id !== profile.id);
+            const rebuilt = await buildProfileFromInput(data, otherProfiles, settings, profile);
+            repo.upsertProfile(rebuilt);
+            return rebuilt;
+        });
+        if (!updated) return { status: 404, data: { success: false, error: 'Profile not found' } };
         notifyUIRefresh();
         return {
             success: true,
-            profile: profiles[idx],
-            remoteDebugPort: settings.enableRemoteDebugging ? profiles[idx].debugPort : null
+            profile: updated,
+            remoteDebugPort: settings.enableRemoteDebugging ? updated.debugPort : null
         };
     }
 
     // DELETE /api/profiles/:idOrName
     if (method === 'DELETE' && profileMatch) {
-        const profile = findProfile(decodeURIComponent(profileMatch[1]));
-        if (!profile) return { status: 404, data: { success: false, error: 'Profile not found' } };
-        profiles = profiles.filter(p => p.id !== profile.id);
-        await fs.writeJson(PROFILES_FILE, profiles);
+        const idOrName = decodeURIComponent(profileMatch[1]);
+        const deletedProfile = await profileStore.runExclusive((repo) => {
+            const profile = repo.getProfile(idOrName);
+            if (!profile) return null;
+            repo.deleteProfile(profile.id);
+            return profile;
+        });
+        if (!deletedProfile) return { status: 404, data: { success: false, error: 'Profile not found' } };
+        profiles = await profileStore.readProfiles();
         notifyUIRefresh(); // Notify UI to refresh
         return { success: true, message: 'Profile deleted' };
     }
@@ -1661,6 +1758,34 @@ async function handleApiRequest(method, pathname, body, params, context = {}) {
         };
     }
 
+    // GET /api/export/one?password=xxx&id=profileId&path=D%3A%5Ccache%5Cbackup.geekez
+    if (method === 'GET' && pathname === '/api/export/one') {
+        const password = params.get('password');
+        const id = String(params.get('id') || '').trim();
+        const outputPath = String(params.get('path') || '').trim();
+
+        if (!password) return { status: 400, data: { success: false, error: 'Password required. Use ?password=yourpassword' } };
+        if (!id) return { status: 400, data: { success: false, error: 'Profile id required. Use ?id=profileId' } };
+        if (!outputPath) return { status: 400, data: { success: false, error: 'Output path required. Use ?path=D%3A%5Cbackup.geekez' } };
+
+        const profile = findProfile(id);
+        if (!profile) return { status: 404, data: { success: false, error: 'Profile not found' } };
+
+        const encrypted = await createEncryptedFullBackupForProfiles([profile], settings, password);
+        const resolvedOutputPath = path.resolve(outputPath);
+        await fs.ensureDir(path.dirname(resolvedOutputPath));
+        await fs.writeFile(resolvedOutputPath, encrypted);
+
+        return {
+            success: true,
+            filePath: resolvedOutputPath,
+            filename: path.basename(resolvedOutputPath),
+            profileId: profile.id,
+            profileName: profile.name,
+            profileCount: 1
+        };
+    }
+
     // GET /api/export/fingerprint - Export YAML fingerprints
     if (method === 'GET' && pathname === '/api/export/fingerprint') {
         const exportData = profiles.map(p => ({
@@ -1692,21 +1817,25 @@ async function handleApiRequest(method, pathname, body, params, context = {}) {
             try {
                 const yamlData = yaml.load(content);
                 if (Array.isArray(yamlData)) {
-                    let imported = 0;
-                    for (const item of yamlData) {
-                        const name = generateUniqueName(item.name || `Imported-${Date.now()}`);
-                        const newProfile = {
-                            id: uuidv4(),
-                            name,
-                            proxyStr: item.proxyStr || '',
-                            tags: item.tags || [],
-                            fingerprint: item.fingerprint || await generateFingerprint({}),
-                            createdAt: Date.now()
-                        };
-                        profiles.push(newProfile);
-                        imported++;
-                    }
-                    await fs.writeJson(PROFILES_FILE, profiles);
+                    const imported = await profileStore.runExclusive(async (repo) => {
+                        const currentProfiles = repo.readProfiles();
+                        let importedCount = 0;
+                        for (const item of yamlData) {
+                            const name = buildUniqueProfileName(currentProfiles, item.name || `Imported-${Date.now()}`);
+                            const newProfile = {
+                                id: uuidv4(),
+                                name,
+                                proxyStr: item.proxyStr || '',
+                                tags: item.tags || [],
+                                fingerprint: item.fingerprint || await generateFingerprint({}),
+                                createdAt: Date.now()
+                            };
+                            currentProfiles.push(newProfile);
+                            repo.upsertProfile(newProfile);
+                            importedCount++;
+                        }
+                        return importedCount;
+                    });
                     notifyUIRefresh(); // Notify UI to refresh
                     return { success: true, message: `Imported ${imported} profiles from YAML`, count: imported };
                 }
@@ -1721,14 +1850,18 @@ async function handleApiRequest(method, pathname, body, params, context = {}) {
                 const decompressed = await gunzip(decrypted);
                 const backupData = JSON.parse(decompressed.toString('utf8'));
 
-                let imported = 0;
-                for (const profile of backupData.profiles || []) {
-                    const name = generateUniqueName(profile.name);
-                    const newProfile = { ...profile, id: uuidv4(), name };
-                    profiles.push(newProfile);
-                    imported++;
-                }
-                await fs.writeJson(PROFILES_FILE, profiles);
+                const imported = await profileStore.runExclusive((repo) => {
+                    const currentProfiles = repo.readProfiles();
+                    let importedCount = 0;
+                    for (const profile of backupData.profiles || []) {
+                        const name = buildUniqueProfileName(currentProfiles, profile.name);
+                        const newProfile = { ...profile, id: uuidv4(), name };
+                        currentProfiles.push(newProfile);
+                        repo.upsertProfile(newProfile);
+                        importedCount++;
+                    }
+                    return importedCount;
+                });
                 notifyUIRefresh(); // Notify UI to refresh
                 return { success: true, message: `Imported ${imported} profiles from backup`, count: imported };
             } catch (decryptErr) {
@@ -1914,8 +2047,7 @@ app.on('second-instance', () => {
 });
 
 async function readAllProfilesSafe() {
-    if (!fs.existsSync(PROFILES_FILE)) return [];
-    const profiles = await fs.readJson(PROFILES_FILE).catch(() => []);
+    const profiles = await profileStore.readProfiles().catch(() => []);
     return Array.isArray(profiles) ? profiles : [];
 }
 
@@ -3317,26 +3449,31 @@ ipcMain.handle('get-profile-runtime-state', () => ({
     runningIds: Object.keys(activeProcesses),
     launchingIds: Array.from(launchingProfiles)
 }));
-ipcMain.handle('get-profiles', async () => { if (!fs.existsSync(PROFILES_FILE)) return []; return fs.readJson(PROFILES_FILE); });
+ipcMain.handle('get-profiles', async () => profileStore.readProfiles());
 ipcMain.handle('update-profile', async (event, updatedProfile) => {
-    const profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
-    const index = profiles.findIndex(p => p.id === updatedProfile.id);
-    if (index === -1) return false;
-
     const settings = fs.existsSync(SETTINGS_FILE) ? await fs.readJson(SETTINGS_FILE) : {};
-    const others = profiles.filter((_, i) => i !== index);
-    const rebuilt = await buildProfileFromInput(updatedProfile, others, settings, profiles[index]);
-    profiles[index] = rebuilt;
-    await fs.writeJson(PROFILES_FILE, profiles);
+    const updated = await profileStore.runExclusive(async (repo) => {
+        const profiles = repo.readProfiles();
+        const index = profiles.findIndex(p => p.id === updatedProfile.id);
+        if (index === -1) return false;
+
+        const others = profiles.filter((_, i) => i !== index);
+        const rebuilt = await buildProfileFromInput(updatedProfile, others, settings, profiles[index]);
+        repo.upsertProfile(rebuilt);
+        return true;
+    });
+    if (!updated) return false;
     notifyUIRefresh();
     return true;
 });
 ipcMain.handle('save-profile', async (event, data) => {
-    const profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
     const settings = fs.existsSync(SETTINGS_FILE) ? await fs.readJson(SETTINGS_FILE) : {};
-    const newProfile = await buildProfileFromInput(data, profiles, settings);
-    profiles.push(newProfile);
-    await fs.writeJson(PROFILES_FILE, profiles);
+    const newProfile = await profileStore.runExclusive(async (repo) => {
+        const profiles = repo.readProfiles();
+        const created = await buildProfileFromInput(data, profiles, settings);
+        repo.upsertProfile(created);
+        return created;
+    });
     notifyUIRefresh();
     return newProfile;
 });
@@ -3348,10 +3485,8 @@ ipcMain.handle('delete-profile', async (event, id) => {
         await new Promise(r => setTimeout(r, 1000));
     }
 
-    // 从 profiles.json 中删除
-    let profiles = await fs.readJson(PROFILES_FILE);
-    profiles = profiles.filter(p => p.id !== id);
-    await fs.writeJson(PROFILES_FILE, profiles);
+    // Remove from SQLite profile store first; then delete the profile directory.
+    await profileStore.deleteProfile(id);
     notifyUIRefresh();
 
     // 永久删除 profile 文件夹（带重试机制）
@@ -3656,11 +3791,15 @@ ipcMain.handle('set-data-directory', async (e, { newPath, migrate }) => {
         // 如果需要迁移数据
         if (migrate && DATA_PATH !== newPath) {
             const oldProfiles = path.join(DATA_PATH, 'profiles.json');
+            const oldProfilesDb = path.join(DATA_PATH, 'profiles.sqlite');
             const oldSettings = path.join(DATA_PATH, 'settings.json');
 
             // 迁移 profiles.json
             if (fs.existsSync(oldProfiles)) {
                 await fs.copy(oldProfiles, path.join(newPath, 'profiles.json'));
+            }
+            if (fs.existsSync(oldProfilesDb)) {
+                await fs.copy(oldProfilesDb, path.join(newPath, 'profiles.sqlite'));
             }
             // 迁移 settings.json
             if (fs.existsSync(oldSettings)) {
@@ -3669,7 +3808,8 @@ ipcMain.handle('set-data-directory', async (e, { newPath, migrate }) => {
 
             // 迁移所有环境数据目录
             const profiles = fs.existsSync(oldProfiles) ? await fs.readJson(oldProfiles) : [];
-            for (const profile of profiles) {
+            const migratedProfiles = await profileStore.readProfiles().catch(() => []);
+            for (const profile of migratedProfiles) {
                 const oldDir = path.join(DATA_PATH, profile.id);
                 const newDir = path.join(newPath, profile.id);
                 if (fs.existsSync(oldDir)) {
@@ -3806,13 +3946,13 @@ async function writeEncryptedPasswords(pwFile, passwords, profileId) {
 
 // 获取用于选择器的环境列表
 ipcMain.handle('get-export-profiles', async () => {
-    const profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
+    const profiles = await profileStore.readProfiles();
     return profiles.map(p => ({ id: p.id, name: p.name, tags: p.tags || [] }));
 });
 
 // 导出选定环境 (精简版，不含浏览器数据)
 ipcMain.handle('export-selected-data', async (e, { type, profileIds }) => {
-    const allProfiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
+    const allProfiles = await profileStore.readProfiles();
     const settings = fs.existsSync(SETTINGS_FILE) ? await fs.readJson(SETTINGS_FILE) : { preProxies: [], subscriptions: [] };
 
     // 过滤选中的环境
@@ -3868,7 +4008,7 @@ ipcMain.handle('export-full-backup', async (e, { profileIds, password, filePath 
         }
         
         currentImportProgress = { percent: 5, message: 'Preparing Profiles...', processing: true };
-        const allProfiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
+        const allProfiles = await profileStore.readProfiles();
         const settings = fs.existsSync(SETTINGS_FILE) ? await fs.readJson(SETTINGS_FILE) : { preProxies: [], subscriptions: [] };
 
         const selectedProfiles = allProfiles
@@ -4025,14 +4165,18 @@ ipcMain.handle('import-full-backup', async (e, { filePath, password }) => {
 
         // 还原 profiles
         currentImportProgress = { percent: 40, message: 'Restoring Profiles...', processing: true };
-        const currentProfiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
-        let importedCount = 0;
-        for (const profile of backupData.profiles) {
-            const idx = currentProfiles.findIndex(cp => cp.id === profile.id);
-            if (idx > -1) { currentProfiles[idx] = profile; } else { currentProfiles.push(profile); }
-            importedCount++;
-        }
-        await fs.writeJson(PROFILES_FILE, currentProfiles);
+        const importedCount = await profileStore.runExclusive((repo) => {
+            const currentProfiles = repo.readProfiles();
+            let count = 0;
+            for (const profile of backupData.profiles || []) {
+                const idx = currentProfiles.findIndex(cp => cp.id === profile.id);
+                if (idx > -1) currentProfiles[idx] = profile;
+                else currentProfiles.push(profile);
+                count++;
+            }
+            repo.replaceProfiles(currentProfiles);
+            return count;
+        });
 
         // 还原代理和订阅
         currentImportProgress = { percent: 50, message: 'Restoring Proxies & Settings...', processing: true };
@@ -4161,16 +4305,17 @@ ipcMain.handle('import-data', async () => {
 
             if (data.profiles || data.preProxies || data.subscriptions) {
                 if (Array.isArray(data.profiles)) {
-                    const currentProfiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
-                    data.profiles.forEach(p => {
-                        const idx = currentProfiles.findIndex(cp => cp.id === p.id);
-                        if (idx > -1) currentProfiles[idx] = p;
-                        else {
-                            if (!p.id) p.id = uuidv4();
-                            currentProfiles.push(p);
-                        }
+                    await profileStore.runExclusive((repo) => {
+                        const currentProfiles = repo.readProfiles();
+                        data.profiles.forEach(p => {
+                            const profile = { ...p };
+                            if (!profile.id) profile.id = uuidv4();
+                            const idx = currentProfiles.findIndex(cp => cp.id === profile.id);
+                            if (idx > -1) currentProfiles[idx] = profile;
+                            else currentProfiles.push(profile);
+                        });
+                        repo.replaceProfiles(currentProfiles);
                     });
-                    await fs.writeJson(PROFILES_FILE, currentProfiles);
                     updated = true;
                 }
                 if (Array.isArray(data.preProxies) || Array.isArray(data.subscriptions)) {
@@ -4192,10 +4337,8 @@ ipcMain.handle('import-data', async () => {
                 }
             } else if (data.name && data.proxyStr && data.fingerprint) {
                 // 单个环境导入
-                const profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
                 const newProfile = { ...data, id: uuidv4(), isSetup: false, createdAt: Date.now() };
-                profiles.push(newProfile);
-                await fs.writeJson(PROFILES_FILE, profiles);
+                await profileStore.upsertProfile(newProfile);
                 updated = true;
             }
             return updated;
@@ -4209,7 +4352,7 @@ ipcMain.handle('import-data', async () => {
 
 // 保留旧的 export-data 用于向后兼容 (deprecated)
 ipcMain.handle('export-data', async (e, type) => {
-    const profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
+    const profiles = await profileStore.readProfiles();
     const settings = fs.existsSync(SETTINGS_FILE) ? await fs.readJson(SETTINGS_FILE) : { preProxies: [], subscriptions: [] };
 
     // 清理 fingerprint
@@ -4326,7 +4469,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
     }));
     const uiLang = preferredLang === 'en' ? 'en' : (settings.lang === 'en' ? 'en' : 'cn');
 
-    const profiles = await fs.readJson(PROFILES_FILE);
+    const profiles = await profileStore.readProfiles();
     const profileIndex = profiles.findIndex(p => p.id === profileId);
     const profile = profileIndex > -1 ? profiles[profileIndex] : null;
     if (!profile) throw new Error('Profile not found');
@@ -4345,7 +4488,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
     if (settings.enableRemoteDebugging && !normalizeDebugPort(profile.debugPort)) {
         profile.debugPort = await allocateDebugPortIfNeeded(settings, profiles, null);
         profiles[profileIndex] = profile;
-        await fs.writeJson(PROFILES_FILE, profiles);
+        await profileStore.upsertProfile(profile);
     }
 
     const useDirectNetwork = isDirectProxy(profile.proxyStr);

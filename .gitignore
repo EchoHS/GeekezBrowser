@@ -1,6 +1,9 @@
 node_modules/
 dist/
+dist_py/
+build_py/
 release/
+__pycache__/
 userData/
 BrowserProfiles/
 _Trash_Bin/
@@ -14,3 +17,4 @@ tools/
 out/
 *.log
 *.exe
+*.geekez
