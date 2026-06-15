@@ -235,16 +235,41 @@ function parseCliLikeArgs(rawValue) {
     const text = String(rawValue || '').trim();
     if (!text) return [];
 
-    const matches = text.match(/"[^"]*"|'[^']*'|[^\s]+/g) || [];
-    return matches
-        .map((part) => String(part || '').trim())
-        .map((part) => {
-            if ((part.startsWith('"') && part.endsWith('"')) || (part.startsWith("'") && part.endsWith("'"))) {
-                return part.slice(1, -1);
+    const args = [];
+    let current = '';
+    let quote = '';
+
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        const next = text[i + 1];
+
+        if (quote) {
+            if (ch === quote) {
+                quote = '';
+            } else {
+                current += ch;
             }
-            return part;
-        })
-        .filter(Boolean);
+            continue;
+        }
+
+        if (ch === '"' || ch === "'") {
+            quote = ch;
+            continue;
+        }
+
+        if (/\s/.test(ch) && next === '-' && text[i + 2] === '-') {
+            const normalized = current.trim();
+            if (normalized) args.push(normalized);
+            current = '';
+            continue;
+        }
+
+        current += ch;
+    }
+
+    const normalized = current.trim();
+    if (normalized) args.push(normalized);
+    return args;
 }
 
 function normalizeLaunchOverrideArgs(input) {
