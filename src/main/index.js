@@ -1606,15 +1606,10 @@ async function handleApiRequest(method, pathname, body, params, context = {}) {
     // DELETE /api/profiles/:idOrName
     if (method === 'DELETE' && profileMatch) {
         const idOrName = decodeURIComponent(profileMatch[1]);
-        const deletedProfile = await profileStore.runExclusive((repo) => {
-            const profile = repo.getProfile(idOrName);
-            if (!profile) return null;
-            repo.deleteProfile(profile.id);
-            return profile;
-        });
+        const deletedProfile = await profileStore.runExclusive((repo) => repo.getProfile(idOrName));
         if (!deletedProfile) return { status: 404, data: { success: false, error: 'Profile not found' } };
+        await deleteProfileCompletely(deletedProfile.id);
         profiles = await profileStore.readProfiles();
-        notifyUIRefresh(); // Notify UI to refresh
         return { success: true, message: 'Profile deleted' };
     }
 
@@ -2450,6 +2445,48 @@ function notifyUIRefresh() {
         } catch (e) { }
     });
     refreshTrayMenu().catch(() => { });
+}
+
+async function deleteProfileCompletely(id) {
+    if (activeProcesses[id]) {
+        await stopRunningProfile(id, { refreshMenu: false });
+        await new Promise(r => setTimeout(r, 1000));
+    }
+
+    await profileStore.deleteProfile(id);
+    notifyUIRefresh();
+
+    const profileDir = path.join(DATA_PATH, id);
+    let deleted = false;
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            if (fs.existsSync(profileDir)) {
+                await fs.remove(profileDir);
+                console.log(`Deleted profile folder: ${profileDir}`);
+            }
+            deleted = true;
+            break;
+        } catch (err) {
+            console.error(`Delete attempt ${attempt} failed:`, err.message);
+            if (attempt < 3) {
+                await new Promise(r => setTimeout(r, 500 * attempt));
+            }
+        }
+    }
+
+    if (!deleted && fs.existsSync(profileDir)) {
+        console.warn(`Failed to delete, moving to trash: ${profileDir}`);
+        const trashDest = path.join(TRASH_PATH, `${id}_${Date.now()}`);
+        try {
+            await fs.move(profileDir, trashDest);
+            console.log(`Moved to trash: ${trashDest}`);
+        } catch (err) {
+            console.error('Failed to move to trash:', err);
+        }
+    }
+
+    return true;
 }
 
 async function generateExtension(profilePath, fingerprint, profileName, watermarkStyle, profileId) {
@@ -3478,56 +3515,7 @@ ipcMain.handle('save-profile', async (event, data) => {
     return newProfile;
 });
 ipcMain.handle('delete-profile', async (event, id) => {
-    // 关闭正在运行的进程
-    if (activeProcesses[id]) {
-        await stopRunningProfile(id, { refreshMenu: false });
-        // Windows 需要更长的等待时间让文件释放
-        await new Promise(r => setTimeout(r, 1000));
-    }
-
-    // Remove from SQLite profile store first; then delete the profile directory.
-    await profileStore.deleteProfile(id);
-    notifyUIRefresh();
-
-    // 永久删除 profile 文件夹（带重试机制）
-    const profileDir = path.join(DATA_PATH, id);
-    let deleted = false;
-
-    // 尝试删除 3 次
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            if (fs.existsSync(profileDir)) {
-                // 使用 fs-extra 的 remove，它会递归删除
-                await fs.remove(profileDir);
-                console.log(`Deleted profile folder: ${profileDir}`);
-                deleted = true;
-                break;
-            } else {
-                deleted = true;
-                break;
-            }
-        } catch (err) {
-            console.error(`Delete attempt ${attempt} failed:`, err.message);
-            if (attempt < 3) {
-                // 等待后重试
-                await new Promise(r => setTimeout(r, 500 * attempt));
-            }
-        }
-    }
-
-    // 如果删除失败，移到回收站作为后备方案
-    if (!deleted && fs.existsSync(profileDir)) {
-        console.warn(`Failed to delete, moving to trash: ${profileDir}`);
-        const trashDest = path.join(TRASH_PATH, `${id}_${Date.now()}`);
-        try {
-            await fs.move(profileDir, trashDest);
-            console.log(`Moved to trash: ${trashDest}`);
-        } catch (err) {
-            console.error(`Failed to move to trash:`, err);
-        }
-    }
-
-    return true;
+    return deleteProfileCompletely(id);
 });
 ipcMain.handle('get-settings', async () => {
     if (!fs.existsSync(SETTINGS_FILE)) {
