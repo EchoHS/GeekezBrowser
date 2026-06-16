@@ -161,7 +161,11 @@ function parseBrowserVersionPreset(preset) {
 }
 
 // Searchable Dropdowns State
-const timezoneSearch = ref('Auto (No Change)');
+const AUTO_TIMEZONE_LABEL = 'Auto (IP Based)';
+const LEGACY_AUTO_TIMEZONE_LABEL = 'Auto (No Change)';
+const AUTO_CITY = { name: 'Auto (IP Based)', lat: null, lng: null };
+
+const timezoneSearch = ref(AUTO_TIMEZONE_LABEL);
 const showTimezoneList = ref(false);
 const citySearch = ref('Auto (IP Based)');
 const showCityList = ref(false);
@@ -170,7 +174,7 @@ const showLanguageList = ref(false);
 
 // Lists (Accessing from global window if not imported)
 const allTimezones = window.TIMEZONES || [];
-const allCities = window.CITY_DATA || [];
+const allCities = [AUTO_CITY, ...(window.CITY_DATA || [])];
 const allLanguages = window.LANGUAGE_DATA || [
   { name: 'Auto (System Default)', code: 'auto' },
   { name: 'English (US)', code: 'en-US' }
@@ -192,8 +196,9 @@ const filteredLanguages = computed(() => {
 });
 
 function selectTimezone(tz) {
-  form.timezone = tz === 'Auto (No Change)' ? 'Auto' : tz;
-  timezoneSearch.value = tz;
+  const isAuto = tz === AUTO_TIMEZONE_LABEL || tz === LEGACY_AUTO_TIMEZONE_LABEL || tz === 'Auto';
+  form.timezone = isAuto ? 'Auto' : tz;
+  timezoneSearch.value = isAuto ? AUTO_TIMEZONE_LABEL : tz;
   showTimezoneList.value = false;
 }
 
@@ -244,7 +249,7 @@ watch(() => uiStore.addModalVisible, async (newVal) => {
       browserVersionPreset: 'none',
       webglProfile: 'none'
     });
-    timezoneSearch.value = 'Auto (No Change)';
+    timezoneSearch.value = AUTO_TIMEZONE_LABEL;
     citySearch.value = 'Auto (IP Based)';
     languageSearch.value = 'Auto (System Default)';
     try {
