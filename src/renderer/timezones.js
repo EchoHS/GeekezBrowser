@@ -1,5 +1,4 @@
-// Comprehensive IANA Timezone list for dropdown
-// Fix: Export to window for global access (module scope issue)
+// Comprehensive IANA timezone list for the profile dropdown.
 const TIMEZONES = [
     "Auto (IP Based)",
     // --- North America ---
@@ -123,11 +122,8 @@ const TIMEZONES = [
     "America/Salt_Lake_City",  // Utah
 ];
 
-// Export for both CommonJS and browser global
-if (typeof module !== "undefined" && module.exports) {
-    module.exports = TIMEZONES;
-}
-// Fix: Ensure window.TIMEZONES is set even in module context
-if (typeof window !== "undefined") {
-    window.TIMEZONES = TIMEZONES;
-}
+const timezoneHost = typeof globalThis === "object" ? globalThis : null;
+
+if (timezoneHost) timezoneHost.TIMEZONES = TIMEZONES;
+
+if (typeof module === "object" && module.exports) Object.assign(module, { exports: TIMEZONES });

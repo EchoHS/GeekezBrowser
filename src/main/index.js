@@ -12,10 +12,10 @@ const os = require('os');
 const crypto = require('crypto');
 const zlib = require('zlib');
 const { promisify } = require('util');
-const { getChromiumPath: resolveChromiumPathForApp } = require('./chromium-path');
-const { CLOSE_BEHAVIOR, normalizeCloseBehavior, resolveCloseBehavior } = require('./close-behavior');
+const chromiumLocator = require('./chromium-path');
+const { CLOSE_BEHAVIOR, decideCloseAction, normalizeCloseBehavior } = require('./close-behavior');
 const { fetchLatestGitHubReleaseInfo } = require('./release-check');
-const { resolveXrayAssetName } = require('./xray-assets');
+const xrayRelease = require('./xray-assets');
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
 const initSqlJs = require('sql.js');
@@ -2191,7 +2191,7 @@ function forceKill(pid) {
 }
 
 function getChromiumPath() {
-    return resolveChromiumPathForApp({
+    return chromiumLocator.getChromiumPath({
         isDev,
         appPath: app.getAppPath(),
         resourcesPath: process.resourcesPath,
@@ -2242,10 +2242,11 @@ function getCloseBehavior() {
     return normalizeCloseBehavior(cachedCloseBehavior);
 }
 
-function isTrayAvailable() {
-    return !!appTray && (typeof appTray.isDestroyed !== 'function' || !appTray.isDestroyed());
-}
-
+const hasUsableTrayEntry = () => {
+    if (!appTray) return false;
+    const destroyed = typeof appTray.isDestroyed === 'function' ? appTray.isDestroyed() : false;
+    return Boolean(destroyed !== true);
+};
 function showMainWindow() {
     if (!mainWindow || mainWindow.isDestroyed()) {
         createWindow();
@@ -2687,11 +2688,10 @@ function createWindow() {
     win.on('close', (event) => {
         if (isAppQuitting) return;
 
-        const effectiveCloseBehavior = resolveCloseBehavior(getCloseBehavior(), {
-            trayAvailable: isTrayAvailable()
+        const closeAction = decideCloseAction(getCloseBehavior(), {
+            hasTrayEntry: hasUsableTrayEntry()
         });
-
-        if (effectiveCloseBehavior === CLOSE_BEHAVIOR.QUIT) {
+        if (closeAction === CLOSE_BEHAVIOR.QUIT) {
             event.preventDefault();
             quitApplication();
             return;
@@ -3825,7 +3825,33 @@ ipcMain.handle('test-proxy-latency-batch', async (_e, entries) => {
 });
 ipcMain.handle('set-title-bar-color', (e, colors) => { const win = BrowserWindow.fromWebContents(e.sender); if (win) { if (process.platform === 'win32') try { win.setTitleBarOverlay({ color: colors.bg, symbolColor: colors.symbol }); } catch (e) { } win.setBackgroundColor(colors.bg); } });
 ipcMain.handle('check-app-update', async () => { try { const releaseInfo = await fetchLatestGitHubReleaseInfo({ owner: 'EchoHS', repo: 'GeekezBrowser', currentVersion: app.getVersion() }); if (compareVersions(releaseInfo.latestVersion, app.getVersion()) > 0) { return { update: true, remote: releaseInfo.latestVersion, url: 'https://browser.geekez.net/#downloads', notes: releaseInfo.notes }; } return { update: false }; } catch (e) { return { update: false, error: e.message }; } });
-ipcMain.handle('check-xray-update', async () => { try { const data = await fetchJson('https://api.github.com/repos/XTLS/Xray-core/releases/latest'); if (!data || !data.tag_name) return { update: false }; const remoteVer = data.tag_name; const currentVer = await getLocalXrayVersion(); if (remoteVer !== currentVer) { const assetName = resolveXrayAssetName({ platform: os.platform(), arch: os.arch() }); if (!assetName) return { update: false, error: `Unsupported platform/arch: ${os.platform()}-${os.arch()}` }; const downloadUrl = `https://gh-proxy.com/https://github.com/XTLS/Xray-core/releases/download/${remoteVer}/${assetName}`; return { update: true, remote: remoteVer.replace(/^v/, ''), downloadUrl }; } return { update: false }; } catch (e) { return { update: false }; } });
+async function checkXrayUpdateAvailable() {
+    try {
+        const release = await fetchJson('https://api.github.com/repos/XTLS/Xray-core/releases/latest');
+        if (!release || !release.tag_name) return { update: false };
+
+        const remoteVersion = release.tag_name;
+        const localVersion = await getLocalXrayVersion();
+        if (remoteVersion === localVersion) return { update: false };
+
+        const assetName = xrayRelease.resolveXrayAssetName({
+            platform: os.platform(),
+            arch: os.arch()
+        });
+        if (!assetName) {
+            return { update: false, error: `Unsupported platform/arch: ${os.platform()}-${os.arch()}` };
+        }
+
+        return {
+            update: true,
+            remote: remoteVersion.replace(/^v/, ''),
+            downloadUrl: `https://gh-proxy.com/https://github.com/XTLS/Xray-core/releases/download/${remoteVersion}/${assetName}`
+        };
+    } catch (e) {
+        return { update: false };
+    }
+}
+ipcMain.handle('check-xray-update', checkXrayUpdateAvailable);
 ipcMain.handle('download-xray-update', async (e, url) => {
     const exeName = process.platform === 'win32' ? 'xray.exe' : 'xray';
     const tempBase = os.tmpdir();

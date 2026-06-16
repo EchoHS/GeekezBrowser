@@ -1,22 +1,28 @@
-const CLOSE_BEHAVIOR = {
-    TRAY: 'tray',
-    QUIT: 'quit'
-};
+const CLOSE_BEHAVIOR = Object.freeze({
+    QUIT: 'quit',
+    TRAY: 'tray'
+});
 
-function normalizeCloseBehavior(rawValue) {
-    return rawValue === CLOSE_BEHAVIOR.QUIT ? CLOSE_BEHAVIOR.QUIT : CLOSE_BEHAVIOR.TRAY;
+function normalizeCloseBehavior(value) {
+    return String(value || '').toLowerCase() === CLOSE_BEHAVIOR.QUIT
+        ? CLOSE_BEHAVIOR.QUIT
+        : CLOSE_BEHAVIOR.TRAY;
 }
 
-function resolveCloseBehavior(rawValue, { trayAvailable = true } = {}) {
-    const preferredBehavior = normalizeCloseBehavior(rawValue);
-    if (preferredBehavior === CLOSE_BEHAVIOR.TRAY && !trayAvailable) {
-        return CLOSE_BEHAVIOR.QUIT;
-    }
-    return preferredBehavior;
+function shouldKeepAppResident(value) {
+    return normalizeCloseBehavior(value) === CLOSE_BEHAVIOR.TRAY;
+}
+
+function decideCloseAction(value, options = {}) {
+    const hasTrayEntry = options.hasTrayEntry !== false;
+    return shouldKeepAppResident(value) && hasTrayEntry
+        ? CLOSE_BEHAVIOR.TRAY
+        : CLOSE_BEHAVIOR.QUIT;
 }
 
 module.exports = {
     CLOSE_BEHAVIOR,
+    decideCloseAction,
     normalizeCloseBehavior,
-    resolveCloseBehavior
+    shouldKeepAppResident
 };

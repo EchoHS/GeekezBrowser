@@ -1,168 +1,207 @@
 const fs = require('fs');
 const path = require('path');
 
-const BUNDLED_BASENAMES = {
-    darwin: ['Google Chrome for Testing'],
-    linux: ['chrome', 'google-chrome', 'chromium', 'chromium-browser'],
-    win32: ['chrome.exe']
-};
+const envPathKeys = Object.freeze([
+    'GEEKEZ_CHROME_PATH',
+    'CHROME_PATH',
+    'CHROMIUM_PATH',
+    'PUPPETEER_EXECUTABLE_PATH'
+]);
 
-const PATH_CANDIDATES = {
+const shellExecutableNames = Object.freeze({
     darwin: ['Google Chrome for Testing', 'Google Chrome'],
     linux: ['google-chrome-stable', 'google-chrome', 'chromium-browser', 'chromium', 'chrome'],
     win32: ['chrome.exe', 'chrome']
-};
+});
 
-function isExecutableFile(filePath, platform = process.platform) {
-    if (!filePath) return false;
+const appBundleExecutables = Object.freeze({
+    darwin: path.join('Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing'),
+    linux: 'chrome',
+    win32: 'chrome.exe'
+});
+
+const bundleFolderPrefixes = Object.freeze({
+    darwin: 'chrome-mac',
+    linux: 'chrome-linux',
+    win32: 'chrome-win'
+});
+
+function uniquePaths(paths) {
+    const seen = new Set();
+    const result = [];
+
+    for (const item of paths) {
+        if (!item || seen.has(item)) continue;
+        seen.add(item);
+        result.push(item);
+    }
+
+    return result;
+}
+
+function isLaunchable(filePath, platform = process.platform) {
+    if (typeof filePath !== 'string' || filePath.length === 0) return false;
+
     try {
         const stat = fs.statSync(filePath);
         if (!stat.isFile()) return false;
-        if (platform === 'win32') return true;
-        fs.accessSync(filePath, fs.constants.X_OK);
+        if (platform !== 'win32') fs.accessSync(filePath, fs.constants.X_OK);
         return true;
-    } catch (error) {
+    } catch (e) {
         return false;
     }
 }
 
-function scoreBundledCandidate(filePath, platform = process.platform) {
-    const normalized = filePath.toLowerCase();
-    let score = 0;
+const canLaunch = isLaunchable;
 
-    if (platform === 'darwin') {
-        if (filePath.endsWith(path.join('Contents', 'MacOS', 'Google Chrome for Testing'))) score += 200;
-        if (normalized.includes('google chrome for testing.app')) score += 100;
-    } else if (platform === 'linux') {
-        if (path.basename(filePath) === 'chrome') score += 200;
-        if (normalized.includes('chrome-linux')) score += 100;
-        if (normalized.includes('chrome-for-testing')) score += 50;
-    } else if (platform === 'win32') {
-        if (path.basename(filePath).toLowerCase() === 'chrome.exe') score += 200;
-        if (normalized.includes('chrome-win')) score += 100;
+function childDirectories(parentDir) {
+    try {
+        return fs.readdirSync(parentDir, { withFileTypes: true })
+            .filter(entry => entry.isDirectory())
+            .map(entry => path.join(parentDir, entry.name));
+    } catch (e) {
+        return [];
     }
-
-    return score;
 }
 
-function findBundledChromiumPath(basePath, platform = process.platform) {
-    if (!basePath || !fs.existsSync(basePath)) return null;
-
-    const basenames = new Set(BUNDLED_BASENAMES[platform] || []);
-    let bestMatch = null;
-
-    function walk(dir, depth = 0) {
-        if (depth > 8) return;
-
-        let entries = [];
-        try {
-            entries = fs.readdirSync(dir, { withFileTypes: true });
-        } catch (error) {
-            return;
-        }
-
-        for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-
-            if (entry.isDirectory()) {
-                walk(fullPath, depth + 1);
-                continue;
-            }
-
-            if (!entry.isFile() && !entry.isSymbolicLink()) continue;
-            if (!basenames.has(entry.name)) continue;
-            if (!isExecutableFile(fullPath, platform)) continue;
-
-            const score = scoreBundledCandidate(fullPath, platform);
-            if (!bestMatch || score > bestMatch.score || (score === bestMatch.score && fullPath.length < bestMatch.path.length)) {
-                bestMatch = { path: fullPath, score };
-            }
-        }
-    }
-
-    walk(basePath);
-    return bestMatch ? bestMatch.path : null;
+function chromeInstallRoots(puppeteerRoot) {
+    if (!puppeteerRoot) return [];
+    return childDirectories(path.join(puppeteerRoot, 'chrome'))
+        .flatMap(releaseDir => childDirectories(releaseDir));
 }
 
-function findExecutableInPath(names, platform = process.platform, env = process.env) {
-    const pathEntries = String(env.PATH || '')
-        .split(path.delimiter)
-        .filter(Boolean);
+function bundledChromeCandidates(puppeteerRoot, platform = process.platform) {
+    const executableName = appBundleExecutables[platform];
+    const folderPrefix = bundleFolderPrefixes[platform];
+    if (!executableName || !folderPrefix) return [];
+
+    const candidates = [];
+
+    for (const installRoot of chromeInstallRoots(puppeteerRoot)) {
+        const folder = path.basename(installRoot).toLowerCase();
+        if (folder.startsWith(folderPrefix)) candidates.push(path.join(installRoot, executableName));
+    }
+
+    return uniquePaths(candidates);
+}
+
+function envChromeCandidates(env = process.env) {
+    return envPathKeys
+        .map(key => env[key])
+        .filter(value => typeof value === 'string' && value.length > 0);
+}
+
+function pathChromeCandidates(platform = process.platform, env = process.env) {
+    const dirs = String(env.PATH || '').split(path.delimiter).filter(Boolean);
+    const names = shellExecutableNames[platform] || [];
+    const candidates = [];
 
     for (const name of names) {
-        for (const dir of pathEntries) {
-            const fullPath = path.join(dir, name);
-            if (isExecutableFile(fullPath, platform)) return fullPath;
-            if (platform === 'win32' && !name.toLowerCase().endsWith('.exe') && isExecutableFile(`${fullPath}.exe`, platform)) {
-                return `${fullPath}.exe`;
+        for (const dir of dirs) {
+            candidates.push(path.join(dir, name));
+            if (platform === 'win32' && !name.toLowerCase().endsWith('.exe')) {
+                candidates.push(path.join(dir, `${name}.exe`));
             }
         }
     }
 
-    return null;
+    return uniquePaths(candidates);
 }
 
-function listExplicitChromiumCandidates(env = process.env) {
-    return [env.CHROME_PATH, env.CHROMIUM_PATH].filter(Boolean);
+function chromeExecutablePath(...segments) {
+    return path.join(...segments, 'Google', 'Chrome', 'Application', 'chrome.exe');
 }
 
-function listStandardChromiumCandidates(platform = process.platform, env = process.env) {
-    const homeDir = env.HOME || env.USERPROFILE || '';
+function installedChromeCandidates(platform = process.platform, env = process.env) {
+    const home = env.HOME || env.USERPROFILE || '';
 
     if (platform === 'darwin') {
-        return [
-            '/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
-            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-            homeDir ? path.join(homeDir, 'Applications', 'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing') : null,
-            homeDir ? path.join(homeDir, 'Applications', 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome') : null
-        ].filter(Boolean);
+        return uniquePaths([
+            path.join('/Applications', 'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing'),
+            path.join('/Applications', 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome'),
+            home && path.join(home, 'Applications', 'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing'),
+            home && path.join(home, 'Applications', 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome')
+        ]);
     }
 
     if (platform === 'win32') {
         const localAppData = env.LOCALAPPDATA || '';
-        const programFiles = env.PROGRAMFILES || 'C:\\Program Files';
+        const programFiles = env.ProgramW6432 || env.PROGRAMFILES || 'C:\\Program Files';
         const programFilesX86 = env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)';
-        return [
-            localAppData ? path.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe') : null,
-            path.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-            path.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe')
-        ].filter(Boolean);
+        return uniquePaths([
+            localAppData && chromeExecutablePath(localAppData),
+            chromeExecutablePath(programFiles),
+            chromeExecutablePath(programFilesX86)
+        ]);
     }
+
+    if (platform === 'linux') {
+        return [
+            ['opt', 'google', 'chrome', 'chrome'],
+            ['usr', 'bin', 'google-chrome-stable'],
+            ['usr', 'bin', 'google-chrome'],
+            ['usr', 'bin', 'chromium-browser'],
+            ['usr', 'bin', 'chromium'],
+            ['snap', 'bin', 'chromium']
+        ].map(parts => path.join('/', ...parts));
+    }
+
+    return [];
+}
+
+function chromiumSearchGroups({ basePath, puppeteerRoot, platform = process.platform, env = process.env } = {}) {
+    const browserBundleRoot = puppeteerRoot || basePath;
 
     return [
-        '/opt/google/chrome/chrome',
-        '/usr/bin/google-chrome-stable',
-        '/usr/bin/google-chrome',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium',
-        '/snap/bin/chromium'
-    ].filter(Boolean);
+        { source: 'bundled', candidates: bundledChromeCandidates(browserBundleRoot, platform) },
+        { source: 'environment', candidates: envChromeCandidates(env) },
+        { source: 'path', candidates: pathChromeCandidates(platform, env) },
+        { source: 'standard-install', candidates: installedChromeCandidates(platform, env) }
+    ];
 }
 
-function resolveChromiumPath({ basePath, platform = process.platform, env = process.env } = {}) {
-    const bundledPath = findBundledChromiumPath(basePath, platform);
-    if (bundledPath) return bundledPath;
+function findChromiumExecutable(options = {}) {
+    const platform = options.platform || process.platform;
+    const checked = [];
 
-    for (const candidate of listExplicitChromiumCandidates(env)) {
-        if (isExecutableFile(candidate, platform)) return candidate;
+    for (const group of chromiumSearchGroups(options)) {
+        for (const candidatePath of group.candidates) {
+            const executable = isLaunchable(candidatePath, platform);
+            checked.push({ source: group.source, path: candidatePath, executable });
+            if (executable) {
+                return { executablePath: candidatePath, source: group.source, checked };
+            }
+        }
     }
 
-    const pathCandidate = findExecutableInPath(PATH_CANDIDATES[platform] || [], platform, env);
-    if (pathCandidate) return pathCandidate;
-
-    for (const candidate of listStandardChromiumCandidates(platform, env)) {
-        if (isExecutableFile(candidate, platform)) return candidate;
-    }
-
-    return null;
+    return { executablePath: null, source: null, checked };
 }
 
-function getChromiumPath({ isDev, appPath, resourcesPath, platform = process.platform, env = process.env } = {}) {
-    const basePath = isDev ? path.join(appPath, 'resources', 'puppeteer') : path.join(resourcesPath, 'puppeteer');
-    return resolveChromiumPath({ basePath, platform, env });
+function resolveChromiumPath(options = {}) {
+    return findChromiumExecutable(options).executablePath;
+}
+
+function resolvePuppeteerRoot({ isDev, appPath, resourcesPath } = {}) {
+    if (isDev) return appPath ? path.join(appPath, 'resources', 'puppeteer') : null;
+    return resourcesPath ? path.join(resourcesPath, 'puppeteer') : null;
+}
+
+function getChromiumPathDetails({ isDev, appPath, resourcesPath, platform = process.platform, env = process.env } = {}) {
+    return findChromiumExecutable({
+        puppeteerRoot: resolvePuppeteerRoot({ isDev, appPath, resourcesPath }),
+        platform,
+        env
+    });
+}
+
+function getChromiumPath(options = {}) {
+    return getChromiumPathDetails(options).executablePath;
 }
 
 module.exports = {
+    canLaunch,
+    findChromiumExecutable,
     getChromiumPath,
+    getChromiumPathDetails,
     resolveChromiumPath
 };

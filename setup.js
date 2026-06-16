@@ -4,7 +4,7 @@ const https = require('https');
 const os = require('os');
 const { exec } = require('child_process');
 const readline = require('readline'); // 引入 readline 用于控制光标
-const { resolveXrayAssetName } = require('./src/main/xray-assets');
+const xrayAssets = require('./src/main/xray-assets');
 
 // 配置
 const RESOURCES_BIN = path.join(__dirname, 'resources', 'bin');
@@ -52,17 +52,14 @@ function getPlatformInfo() {
     const platform = os.platform();
     const arch = os.arch();
     let exeName = 'xray';
-    const xrayAsset = resolveXrayAssetName({ platform, arch });
-
-    if (!xrayAsset) {
-        console.error('❌ Unsupported Platform/Arch:', `${platform}-${arch}`);
-        process.exit(1);
-    }
-
+    const xrayAsset = xrayAssets.resolveXrayAssetName({
+        platform,
+        arch
+    });
+    if (!xrayAsset) throw new Error(`Unsupported Platform/Arch: ${[platform, arch].join('-')}`);
     if (platform === 'win32') {
         exeName = 'xray.exe';
     }
-
     return { xrayAsset, exeName };
 }
 

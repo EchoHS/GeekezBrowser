@@ -1,47 +1,78 @@
-function parseArmVersion(value) {
+const xrayOsNames = Object.freeze({
+    darwin: 'macos',
+    linux: 'linux',
+    win32: 'windows'
+});
+
+const xrayArchNames = Object.freeze({
+    darwin: Object.freeze({
+        arm64: 'arm64-v8a',
+        x64: '64'
+    }),
+    linux: Object.freeze({
+        arm64: 'arm64-v8a',
+        ia32: '32',
+        x64: '64'
+    }),
+    win32: Object.freeze({
+        arm64: 'arm64-v8a',
+        ia32: '32',
+        x64: '64'
+    })
+});
+
+function firstArmVersionValue({ env = process.env, processConfig = process.config } = {}) {
+    return [
+        env.npm_config_arm_version,
+        env.NPM_CONFIG_ARM_VERSION,
+        processConfig?.variables?.arm_version
+    ].find(value => value !== undefined && value !== null && value !== '');
+}
+
+function readPositiveInteger(value) {
     const parsed = Number.parseInt(String(value || ''), 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-function detectArmVersion({ env = process.env, processConfig = process.config } = {}) {
-    return parseArmVersion(
-        env.npm_config_arm_version ||
-        env.NPM_CONFIG_ARM_VERSION ||
-        processConfig?.variables?.arm_version
-    );
+function detectArmVersion(options = {}) {
+    return readPositiveInteger(firstArmVersionValue(options));
 }
 
-function resolveLinuxXrayAssetName({ arch, armVersion = detectArmVersion() } = {}) {
-    if (arch === 'x64') return 'Xray-linux-64.zip';
-    if (arch === 'ia32') return 'Xray-linux-32.zip';
-    if (arch === 'arm64') return 'Xray-linux-arm64-v8a.zip';
-    if (arch !== 'arm') return null;
-
-    if (armVersion === 5) return 'Xray-linux-arm32-v5.zip';
-    if (armVersion === 6) return 'Xray-linux-arm32-v6.zip';
-
-    // Default to v7a when the exact ARM variant is unavailable.
-    return 'Xray-linux-arm32-v7a.zip';
+function linuxArm32Name(armVersion) {
+    if (armVersion === 5) return 'arm32-v5';
+    if (armVersion === 6) return 'arm32-v6';
+    return 'arm32-v7a';
 }
 
-function resolveXrayAssetName({ platform = process.platform, arch = process.arch, armVersion } = {}) {
-    if (platform === 'win32') {
-        return `Xray-windows-${arch === 'x64' ? '64' : '32'}.zip`;
-    }
+function resolveArchName({ platform, arch, armVersion = detectArmVersion() } = {}) {
+    if (platform === 'linux' && arch === 'arm') return linuxArm32Name(armVersion);
+    return xrayArchNames[platform]?.[arch] || null;
+}
 
-    if (platform === 'darwin') {
-        return `Xray-macos-${arch === 'arm64' ? 'arm64-v8a' : '64'}.zip`;
-    }
+function normalizeXrayTarget({ platform = process.platform, arch = process.arch, armVersion } = {}) {
+    const osName = xrayOsNames[platform] || null;
+    const archName = resolveArchName({ platform, arch, armVersion });
 
-    if (platform === 'linux') {
-        return resolveLinuxXrayAssetName({ arch, armVersion });
-    }
+    return osName && archName ? { osName, archName } : null;
+}
 
-    return null;
+function chooseXrayReleaseAsset(options = {}) {
+    const target = normalizeXrayTarget(options);
+    return target ? `Xray-${target.osName}-${target.archName}.zip` : null;
+}
+
+function resolveLinuxXrayAssetName({ arch, armVersion } = {}) {
+    return chooseXrayReleaseAsset({ platform: 'linux', arch, armVersion });
+}
+
+function resolveXrayAssetName(options = {}) {
+    return chooseXrayReleaseAsset(options);
 }
 
 module.exports = {
+    chooseXrayReleaseAsset,
     detectArmVersion,
+    normalizeXrayTarget,
     resolveLinuxXrayAssetName,
     resolveXrayAssetName
 };

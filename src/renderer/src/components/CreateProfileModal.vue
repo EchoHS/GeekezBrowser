@@ -91,12 +91,19 @@
           </select>
         </template>
 
-        <div v-if="settings.enableCustomArgs" class="mt-10">
-          <label class="label-tiny">{{ $t('customArgsLabel') }}</label>
-          <textarea v-model="form.customArgs" rows="2" placeholder="--start-maximized" class="mono-text"></textarea>
-          <div class="hint-text">{{ $t('customArgsHint') }}</div>
-        </div>
-
+        <section v-if="customLaunchArgsEnabled" class="launch-args-section">
+          <label class="label-tiny" for="create-profile-launch-args">{{ $t('customArgsLabel') }}</label>
+          <textarea
+            id="create-profile-launch-args"
+            v-model="launchArgumentsText"
+            rows="2"
+            placeholder="--start-maximized"
+            class="launch-args-input"
+            spellcheck="false"
+            autocomplete="off"
+          ></textarea>
+          <p class="hint-text">{{ $t('customArgsHint') }}</p>
+        </section>
         <div class="hint-text mt-10">{{ $t('autoFingerprint') }}</div>
       </div>
       <div class="modal-footer">
@@ -124,8 +131,9 @@ const uiStore = useUIStore();
 const profileStore = useProfileStore();
 
 const isSaving = ref(false);
-const settings = ref({});
+const profileSettings = ref({});
 const showUaWebglModify = ref(false);
+const customLaunchArgsEnabled = computed(() => !!profileSettings.value?.enableCustomArgs);
 
 const form = reactive({
   name: '',
@@ -139,10 +147,11 @@ const form = reactive({
   resW: null,
   resH: null,
   geolocation: null,
-  customArgs: '',
   browserVersionPreset: 'none',
   webglProfile: 'none'
 });
+
+const launchArgumentsText = ref('');
 
 function parseBrowserVersionPreset(preset) {
   if (!preset || preset === 'none') {
@@ -250,22 +259,69 @@ watch(() => uiStore.addModalVisible, async (newVal) => {
       resW: null,
       resH: null,
       geolocation: null,
-      customArgs: '',
       browserVersionPreset: 'none',
       webglProfile: 'none'
     });
+    launchArgumentsText.value = '';
     timezoneSearch.value = AUTO_TIMEZONE_LABEL;
     citySearch.value = 'Auto (IP Based)';
     languageSearch.value = AUTO_LANGUAGE_LABEL;
     try {
-      settings.value = await window.electronAPI.getSettings();
-      showUaWebglModify.value = !!settings.value?.enableUaWebglModify;
+      const loadedSettings = await window.electronAPI.getSettings();
+      profileSettings.value = loadedSettings || {};
+      showUaWebglModify.value = !!profileSettings.value.enableUaWebglModify;
     } catch (e) {
-      settings.value = {};
+      profileSettings.value = {};
       showUaWebglModify.value = false;
     }
   }
 });
+
+function plainTags(value) {
+  return String(value || '')
+    .split(/[,，]/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function plainScreen(width, height) {
+  return width && height ? { width: Number(width), height: Number(height) } : null;
+}
+
+function plainGeolocation(value) {
+  if (!value || typeof value !== 'object') return null;
+
+  const latitude = Number(value.latitude);
+  const longitude = Number(value.longitude);
+  const accuracy = Number(value.accuracy);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  return {
+    latitude,
+    longitude,
+    accuracy: Number.isFinite(accuracy) ? accuracy : 100
+  };
+}
+
+function buildCreateProfilePayload({ name, proxyStr, tags, browserPreset }) {
+  return {
+    name,
+    proxyStr,
+    tags,
+    notes: String(form.notes || ''),
+    timezone: form.timezone,
+    city: form.city || null,
+    geolocation: plainGeolocation(form.geolocation),
+    language: form.language,
+    screen: plainScreen(form.resW, form.resH),
+    uaMode: browserPreset.uaMode,
+    preProxyOverride: form.preProxyOverride,
+    customArgs: String(launchArgumentsText.value || ''),
+    browserType: browserPreset.browserType,
+    browserMajorVersion: browserPreset.browserMajorVersion,
+    webglProfile: form.webglProfile
+  };
+}
 
 onMounted(() => {
   window.addEventListener('mousedown', handleGlobalClick);
@@ -284,7 +340,7 @@ async function handleSave() {
 
   isSaving.value = true;
   try {
-    const tags = form.tags.split(/[,，]/).map(s => s.trim()).filter(s => s);
+    const tags = plainTags(form.tags);
     let createdCount = 0;
 
     for (let i = 0; i < proxyLines.length; i++) {
@@ -302,30 +358,10 @@ async function handleSave() {
         name = `${form.name}-${String(i + 1).padStart(2, '0')}`;
       }
 
-      const screen = (form.resW && form.resH) ? { width: form.resW, height: form.resH } : null;
       const browserPreset = parseBrowserVersionPreset(form.browserVersionPreset);
+      const payload = buildCreateProfilePayload({ name, proxyStr, tags, browserPreset });
 
-      const payload = {
-        name,
-        proxyStr,
-        tags,
-        notes: form.notes,
-        timezone: form.timezone,
-        city: form.city,
-        geolocation: form.geolocation,
-        language: form.language,
-        screen,
-        uaMode: browserPreset.uaMode,
-        preProxyOverride: form.preProxyOverride,
-        customArgs: form.customArgs,
-        browserType: browserPreset.browserType,
-        browserMajorVersion: browserPreset.browserMajorVersion,
-        webglProfile: form.webglProfile
-      };
-      // Strip Vue reactive proxies to avoid Electron IPC clone failures for geolocation and similar objects.
-      const safePayload = JSON.parse(JSON.stringify(payload));
-
-      await profileStore.createProfile(safePayload);
+      await profileStore.createProfile(payload);
       createdCount++;
     }
 
@@ -372,11 +408,8 @@ async function handleSave() {
 .gap-5 {
   gap: 5px;
 }
-
-.mono-text {
-  font-family: monospace;
-  font-size: 11px;
-}
+.launch-args-input { font-family: monospace; font-size: 11px; min-height: 52px; }
+.launch-args-section { margin-top: 10px; }
 
 .profile-notes-textarea {
   min-height: 86px;
