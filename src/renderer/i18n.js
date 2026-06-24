@@ -158,6 +158,8 @@ const enTranslations = {
     debugEnableDesc: "When enabled, you can specify a custom debugging port for each profile",
     watermarkTitle: "🏷️ Watermark Style",
     watermarkDesc: "Choose watermark display style, takes effect after restarting the profile",
+    watermarkOffLabel: "🚫 Disabled",
+    watermarkOffDesc: "Do not display any environment watermark on web pages",
     watermarkEnhancedLabel: "🎯 Enhanced Watermark (Recommended)",
     watermarkEnhancedDesc: "Bottom-right corner, gradient background + icon, subtle pulse animation, no page space occupied",
     watermarkBannerLabel: "🔹 Top Banner",

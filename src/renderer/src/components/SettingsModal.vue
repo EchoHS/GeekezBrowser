@@ -291,6 +291,24 @@
                         </p>
 
                         <div style="display:flex; flex-direction:column; gap:12px;">
+                            <label :style="{ borderColor: settingsStore.watermarkStyle === 'off' ? 'var(--accent)' : 'var(--border)' }"
+                                style="display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid; border-radius:6px; cursor:pointer; transition:0.2s;">
+                                <input type="radio" name="watermarkStyle" value="off"
+                                    style="margin-top:3px; width:auto; cursor:pointer;"
+                                    :checked="settingsStore.watermarkStyle === 'off'"
+                                    @change="settingsStore.saveWatermarkStyle('off')">
+                                <div style="flex:1;">
+                                    <div style="font-weight:bold; margin-bottom:5px; color:var(--text-primary);"
+                                        data-i18n="watermarkOffLabel">
+                                        {{ $t('watermarkOffLabel') }}
+                                    </div>
+                                    <div style="font-size:11px; color:var(--text-secondary); line-height:1.5;"
+                                        data-i18n="watermarkOffDesc">
+                                        {{ $t('watermarkOffDesc') }}
+                                    </div>
+                                </div>
+                            </label>
+
                             <!-- 方案5: 增强水印 (默认) -->
                             <label :style="{ borderColor: settingsStore.watermarkStyle === 'enhanced' ? 'var(--accent)' : 'var(--border)' }"
                                 style="display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid; border-radius:6px; cursor:pointer; transition:0.2s;">

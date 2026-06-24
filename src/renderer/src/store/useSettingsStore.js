@@ -33,7 +33,9 @@ export const useSettingsStore = defineStore('settings', {
                 this.enableApiServer = settings.enableApiServer || false;
                 this.closeBehavior = settings.closeBehavior === 'quit' ? 'quit' : 'tray';
                 this.apiPort = settings.apiPort || 12138;
-                this.watermarkStyle = settings.watermarkStyle || 'enhanced';
+                this.watermarkStyle = settings.watermarkStyle === 'banner' || settings.watermarkStyle === 'off'
+                    ? settings.watermarkStyle
+                    : 'enhanced';
                 localStorage.setItem('geekez_watermark_style', this.watermarkStyle);
 
                 // Load API Status
@@ -133,10 +135,11 @@ export const useSettingsStore = defineStore('settings', {
         },
 
         async saveWatermarkStyle(style) {
-            this.watermarkStyle = style;
-            localStorage.setItem('geekez_watermark_style', style);
+            const nextStyle = style === 'banner' || style === 'off' ? style : 'enhanced';
+            this.watermarkStyle = nextStyle;
+            localStorage.setItem('geekez_watermark_style', nextStyle);
             const settings = await ipcService.getSettings();
-            settings.watermarkStyle = style;
+            settings.watermarkStyle = nextStyle;
             await ipcService.saveSettings(settings);
         },
 

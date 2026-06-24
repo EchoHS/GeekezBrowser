@@ -160,6 +160,8 @@ window.zhCN = {
     debugEnableDesc: "启用后，您可以为每个环境指定自定义调试端口",
     watermarkTitle: "🏷️ 环境标识样式",
     watermarkDesc: "选择环境标识的显示样式，重启环境后生效",
+    watermarkOffLabel: "🚫 关闭水印",
+    watermarkOffDesc: "网页内不显示任何环境标识",
     watermarkEnhancedLabel: "🎯 增强水印 (推荐)",
     watermarkEnhancedDesc: "右下角显示，渐变背景 + 图标，轻微脉冲动画，不占用页面空间",
     watermarkBannerLabel: "🔹 顶部横幅",

@@ -397,7 +397,7 @@ async function streamApiOpenProfile({ req, res, params, settings, profile, resol
         const launchMessage = await launchProfileHandler(
             { sender },
             profile.id,
-            settings.watermarkStyle || 'enhanced',
+            settings.watermarkStyle === 'banner' || settings.watermarkStyle === 'off' ? settings.watermarkStyle : 'enhanced',
             lang,
             { launchArgsOverride: launchOverrideArgs }
         );
@@ -2028,7 +2028,7 @@ async function handleApiRequest(method, pathname, body, params, context = {}) {
         const launchMessage = await launchProfileHandler(
             launchEvent,
             profile.id,
-            settings.watermarkStyle || 'enhanced',
+            settings.watermarkStyle === 'banner' || settings.watermarkStyle === 'off' ? settings.watermarkStyle : 'enhanced',
             lang,
             { launchArgsOverride: launchOverrideArgs }
         );
@@ -2487,7 +2487,11 @@ async function launchOrFocusProfileFromTray(profileId) {
             try {
                 const settings = readSettingsSync();
                 const launchEvent = getProfileLaunchEventSender();
-                await launchProfileHandler(launchEvent, profile.id, settings.watermarkStyle || 'enhanced');
+                await launchProfileHandler(
+                    launchEvent,
+                    profile.id,
+                    settings.watermarkStyle === 'banner' || settings.watermarkStyle === 'off' ? settings.watermarkStyle : 'enhanced'
+                );
             } catch (e) { }
         }
         await refreshTrayMenu();
@@ -2497,7 +2501,11 @@ async function launchOrFocusProfileFromTray(profileId) {
     try {
         const settings = readSettingsSync();
         const launchEvent = getProfileLaunchEventSender();
-        await launchProfileHandler(launchEvent, profile.id, settings.watermarkStyle || 'enhanced');
+        await launchProfileHandler(
+            launchEvent,
+            profile.id,
+            settings.watermarkStyle === 'banner' || settings.watermarkStyle === 'off' ? settings.watermarkStyle : 'enhanced'
+        );
     } catch (err) {
         dialog.showErrorBox('启动环境失败', String(err?.message || err || '未知错误'));
     }
@@ -2853,7 +2861,7 @@ async function generateExtension(profilePath, fingerprint, profileName, watermar
         ],
         action: { default_popup: "popup.html" }
     };
-    const style = watermarkStyle || 'enhanced';
+    const style = watermarkStyle === 'banner' || watermarkStyle === 'off' ? watermarkStyle : 'enhanced';
     const initialLanguageState = buildRuntimeLanguageState(fingerprint);
     const geoScriptContent = getGeolocationScript(fingerprint);
     const scriptContent = getInjectScript(fingerprint, profileName, style);
@@ -5300,7 +5308,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         }
 
         // 1. 生成 GeekEZ Guard 扩展（使用传递的水印样式）
-        const style = watermarkStyle || 'enhanced'; // 默认使用增强水印
+        const style = watermarkStyle === 'banner' || watermarkStyle === 'off' ? watermarkStyle : 'enhanced';
         const extPath = await generateExtension(profileDir, profile.fingerprint, profile.name, style, profileId);
 
         // 2. 获取当前环境需要加载的用户扩展

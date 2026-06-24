@@ -771,7 +771,7 @@ function getInjectScript(fp, profileName, watermarkStyle) {
     const normalizedFp = generateFingerprint(fp || {});
     const fpJson = JSON.stringify(normalizedFp);
     const safeProfileName = (profileName || 'Profile').replace(/[<>"'&]/g, '');
-    const style = watermarkStyle || 'enhanced';
+    const style = watermarkStyle === 'banner' || watermarkStyle === 'off' ? watermarkStyle : 'enhanced';
 
     return `
     (function() {
@@ -1573,6 +1573,7 @@ function getInjectScript(fp, profileName, watermarkStyle) {
 
             function createWatermark() {
                 try {
+                    if (watermarkStyle === 'off') return;
                     if (document.getElementById('geekez-watermark')) return;
                     if (!document.body) {
                         setTimeout(createWatermark, 50);
@@ -1735,7 +1736,20 @@ function getGeolocationScript(fp) {
 
 function getWatermarkScript(profileName, watermarkStyle) {
     const safeProfileName = (profileName || 'Profile').replace(/[<>"'&]/g, '');
-    const style = watermarkStyle || 'enhanced';
+    const style = watermarkStyle === 'banner' || watermarkStyle === 'off' ? watermarkStyle : 'enhanced';
+
+    if (style === 'off') {
+        return `
+        (function() {
+            try {
+                const watermark = document.getElementById('geekez-watermark');
+                if (watermark && watermark.parentNode) {
+                    watermark.parentNode.removeChild(watermark);
+                }
+            } catch (e) { }
+        })();
+        `;
+    }
 
     return `
     (function() {
