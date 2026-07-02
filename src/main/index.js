@@ -3629,10 +3629,10 @@ async function startPreProxyHealthCheck(url) {
 }
 
 async function waitForProxyChainReady(socksPort, processRef = null, options = {}) {
-    const fastReadyTimeoutMs = Number.isFinite(options.fastReadyTimeoutMs) ? options.fastReadyTimeoutMs : 2600;
-    const fastProbeTimeoutMs = Number.isFinite(options.fastProbeTimeoutMs) ? options.fastProbeTimeoutMs : 1000;
-    const slowReadyTimeoutMs = Number.isFinite(options.slowReadyTimeoutMs) ? options.slowReadyTimeoutMs : 7000;
-    const slowProbeTimeoutMs = Number.isFinite(options.slowProbeTimeoutMs) ? options.slowProbeTimeoutMs : 2200;
+    const fastReadyTimeoutMs = Number.isFinite(options.fastReadyTimeoutMs) ? options.fastReadyTimeoutMs : 3000;
+    const fastProbeTimeoutMs = Number.isFinite(options.fastProbeTimeoutMs) ? options.fastProbeTimeoutMs : 2000;
+    const slowReadyTimeoutMs = Number.isFinite(options.slowReadyTimeoutMs) ? options.slowReadyTimeoutMs : 8000;
+    const slowProbeTimeoutMs = Number.isFinite(options.slowProbeTimeoutMs) ? options.slowProbeTimeoutMs : 4500;
     const targets = Array.isArray(options.targets) ? options.targets : null;
 
     const fastResult = await waitForSocksProxyUsable(
@@ -5227,16 +5227,16 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                     xrayProcess,
                     activePreProxy?.url
                         ? {
-                            fastReadyTimeoutMs: 2600,
-                            fastProbeTimeoutMs: 1000,
-                            slowReadyTimeoutMs: 4200,
-                            slowProbeTimeoutMs: 1800
+                            fastReadyTimeoutMs: 3000,
+                            fastProbeTimeoutMs: 2000,
+                            slowReadyTimeoutMs: 9000,
+                            slowProbeTimeoutMs: 4500
                         }
                         : {
-                            fastReadyTimeoutMs: 2200,
-                            fastProbeTimeoutMs: 900,
-                            slowReadyTimeoutMs: 2600,
-                            slowProbeTimeoutMs: 1400
+                            fastReadyTimeoutMs: 3000,
+                            fastProbeTimeoutMs: 2000,
+                            slowReadyTimeoutMs: 8000,
+                            slowProbeTimeoutMs: 4500
                         }
                 )
             );
