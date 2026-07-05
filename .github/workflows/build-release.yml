@@ -92,34 +92,53 @@ jobs:
       - name: Download Chrome
         run: npx @puppeteer/browsers install chrome@147.0.7727.50 --path resources/puppeteer
 
-      - name: Build
+      - name: Build macOS
+        if: matrix.os == 'darwin'
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ matrix.os }}" = "darwin" ]; then
-            npm run build
-            for attempt in 1 2 3; do
-              if [ "$attempt" -eq 2 ]; then
-                export ELECTRON_BUILDER_BINARIES_MIRROR="https://ghproxy.com/https://github.com/"
-                echo "macOS build retry #$attempt: using proxy mirror for dmg-builder download."
-              fi
-              set +e
-              npx electron-builder --mac
-              code=$?
-              set -e
-              if [ "$code" -eq 0 ]; then
-                break
-              fi
-              if [ "$attempt" -eq 3 ]; then
-                exit "$code"
-              fi
-              echo "::warning::macOS build attempt $attempt failed (exit=$code), retrying after cache clear."
-              rm -rf "$ELECTRON_BUILDER_CACHE/downloads"
-              sleep 12
-            done
-          else
-            ${{ matrix.build_cmd }}
-          fi
+          npm run build
+          for attempt in 1 2 3; do
+            if [ "$attempt" -eq 2 ]; then
+              export ELECTRON_BUILDER_BINARIES_MIRROR="https://ghproxy.com/https://github.com/"
+              echo "macOS build retry #$attempt: using proxy mirror for dmg-builder download."
+            fi
+            set +e
+            npx electron-builder --mac
+            code=$?
+            set -e
+            if [ "$code" -eq 0 ]; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit "$code"
+            fi
+            echo "::warning::macOS build attempt $attempt failed (exit=$code), retrying after cache clear."
+            rm -rf "$ELECTRON_BUILDER_CACHE/downloads"
+            sleep 12
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Build Windows
+        if: matrix.os == 'win32'
+        shell: pwsh
+        run: |
+          npm run build
+          if ("${{ matrix.arch }}" -eq "arm64") {
+            npx electron-builder --win nsis zip --arm64
+          } else {
+            npx electron-builder --win nsis zip --x64
+          }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Build Linux
+        if: matrix.os == 'linux'
+        shell: bash
+        run: ${{ matrix.build_cmd }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
