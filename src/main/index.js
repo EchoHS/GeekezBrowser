@@ -65,7 +65,7 @@ async function createSocksProxyAgent(proxyUrl) {
 // Only disable if GPU compatibility issues occur
 
 import { generateXrayConfig, parseProxyLink, getProxyRemark } from './utils';
-import { generateFingerprint, getInjectScript, getGeolocationScript, getWatermarkScript } from './fingerprint';
+import { generateFingerprint, getInjectScript, getWatermarkScript } from './fingerprint';
 
 const isDev = !app.isPackaged;
 const RESOURCES_BIN = isDev ? path.join(app.getAppPath(), 'resources', 'bin') : path.join(process.resourcesPath, 'bin');
@@ -1520,7 +1520,7 @@ function buildAutoIpBaseFingerprint(baseFingerprint = {}, source, policy) {
     return nextFingerprint;
 }
 
-async function resolveAutoIpBaseFingerprintAfterLaunch(profileId, baseFingerprint, localPort) {
+async function resolveAutoIpBaseFingerprint(profileId, baseFingerprint, localPort) {
     const policy = getAutoIpBasePolicy(baseFingerprint);
     if (!policy.enabled) return null;
 
@@ -1544,6 +1544,47 @@ async function resolveAutoIpBaseFingerprintAfterLaunch(profileId, baseFingerprin
         policy,
         cacheHit: !!cacheMatchesCurrentIp
     };
+}
+
+function logAutoIpBaseResolution(profileName, profileId, resolved) {
+    if (!resolved || !resolved.fingerprint || !resolved.source || !resolved.policy) return;
+
+    const runtimeFingerprint = resolved.fingerprint;
+    const parts = [];
+    if (resolved.policy.location && hasValidGeolocation(runtimeFingerprint.geolocation)) {
+        parts.push(`geo=${runtimeFingerprint.geolocation.latitude},${runtimeFingerprint.geolocation.longitude}`);
+    }
+    if (resolved.policy.timezone && isValidTimezoneId(runtimeFingerprint.timezone)) {
+        parts.push(`timezone=${runtimeFingerprint.timezone}`);
+    }
+    if (resolved.policy.language && canonicalizeLocale(runtimeFingerprint.language)) {
+        parts.push(`language=${runtimeFingerprint.language}`);
+    }
+    console.log(`[Auto IP Base] ${profileName || profileId}: ${resolved.cacheHit ? 'reused cache' : 'refreshed'} ip=${resolved.source.ip}${parts.length ? ` ${parts.join(' ')}` : ''}`);
+}
+
+function isGoogleAuthLikeUrl(rawUrl) {
+    const value = String(rawUrl || '').trim();
+    if (!value) return false;
+
+    try {
+        const parsed = new URL(value);
+        const host = String(parsed.hostname || '').toLowerCase();
+        const pathname = String(parsed.pathname || '').toLowerCase();
+        if (host === 'accounts.google.com' || host.endsWith('.accounts.google.com')) return true;
+        if (host === 'accounts.youtube.com' || host.endsWith('.accounts.youtube.com')) return true;
+        if ((host === 'google.com' || host === 'www.google.com') && pathname.startsWith('/recaptcha/')) return true;
+    } catch (e) { }
+
+    return false;
+}
+
+function isPreNavigationUrl(rawUrl) {
+    const value = String(rawUrl || '').trim().toLowerCase();
+    return !value ||
+        value === 'about:blank' ||
+        value === 'chrome://newtab/' ||
+        value === 'chrome://new-tab-page/';
 }
 
 function ensureProxyStrValid(proxyStr) {
@@ -2271,13 +2312,13 @@ function forceKill(pid) {
 }
 
 function getChromiumPath() {
-    return chromiumLocator.getChromiumPath({
-        isDev,
-        appPath: app.getAppPath(),
-        resourcesPath: process.resourcesPath,
-        platform: process.platform,
-        env: process.env
-    });
+    const lookupContext = {};
+    lookupContext.isDev = Boolean(isDev);
+    lookupContext.appPath = app.getAppPath();
+    lookupContext.resourcesPath = process.resourcesPath;
+    lookupContext.platform = process.platform;
+    lookupContext.env = process.env;
+    return chromiumLocator.getChromiumPath(lookupContext);
 }
 
 // Settings management
@@ -2774,18 +2815,20 @@ function createWindow() {
     
     mainWindow = win; // Store global reference for API
     win.on('close', (event) => {
-        if (isAppQuitting) return;
-
-        const closeAction = decideCloseAction(getCloseBehavior(), {
-            hasTrayEntry: hasUsableTrayEntry()
-        });
-        if (closeAction === CLOSE_BEHAVIOR.QUIT) {
-            event.preventDefault();
-            quitApplication();
+        if (isAppQuitting) {
             return;
         }
 
         event.preventDefault();
+        const shouldQuit = decideCloseAction(getCloseBehavior(), {
+            hasTrayEntry: hasUsableTrayEntry()
+        }) === CLOSE_BEHAVIOR.QUIT;
+
+        if (shouldQuit) {
+            quitApplication();
+            return;
+        }
+
         win.hide();
         if (process.platform === 'darwin' && app.dock && typeof app.dock.hide === 'function') {
             app.dock.hide();
@@ -2827,13 +2870,13 @@ async function generateExtension(profilePath, fingerprint, profileName, watermar
         name: "GeekEZ Guard",
         version: "1.1.0",
         description: "Privacy & Password Protection",
-        permissions: ["storage", "activeTab", "declarativeNetRequest"],
-        host_permissions: ["<all_urls>", "http://127.0.0.1/*", "http://localhost/*"],
+        permissions: ["storage", "activeTab"],
+        host_permissions: ["http://127.0.0.1/*", "http://localhost/*"],
         background: { service_worker: "background.js" },
         content_scripts: [
             {
                 matches: ["<all_urls>"],
-                js: ["geo.js", "content.js"],
+                js: ["content.js"],
                 run_at: "document_start",
                 all_frames: true,
                 match_about_blank: true,
@@ -2848,97 +2891,24 @@ async function generateExtension(profilePath, fingerprint, profileName, watermar
                 match_about_blank: true,
                 match_origin_as_fallback: true,
                 world: "ISOLATED"
-            },
-            {
-                matches: ["<all_urls>"],
-                js: ["runtime.js"],
-                run_at: "document_start",
-                all_frames: false,
-                match_about_blank: true,
-                match_origin_as_fallback: true,
-                world: "ISOLATED"
             }
         ],
         action: { default_popup: "popup.html" }
     };
     const style = watermarkStyle === 'banner' || watermarkStyle === 'off' ? watermarkStyle : 'enhanced';
-    const initialLanguageState = buildRuntimeLanguageState(fingerprint);
-    const geoScriptContent = getGeolocationScript(fingerprint);
     const scriptContent = getInjectScript(fingerprint, profileName, style);
     await fs.writeJson(path.join(extDir, 'manifest.json'), manifest);
-    await fs.writeFile(path.join(extDir, 'geo.js'), geoScriptContent);
     await fs.writeFile(path.join(extDir, 'content.js'), scriptContent);
-
-    const runtimeJs = `
-(function() {
-    'use strict';
-    if (!chrome || !chrome.runtime || typeof chrome.runtime.sendMessage !== 'function') return;
-
-    let fastPollCount = 0;
-    let fastPollTimer = null;
-    let slowPollTimer = null;
-
-    function syncRuntimeLanguage() {
-        try {
-            chrome.runtime.sendMessage({ type: 'SYNC_RUNTIME_LANGUAGE' }, () => {
-                try { void chrome.runtime.lastError; } catch (e) { }
-            });
-        } catch (e) { }
-    }
-
-    function startSyncLoop() {
-        syncRuntimeLanguage();
-        if (fastPollTimer) clearInterval(fastPollTimer);
-        if (slowPollTimer) clearInterval(slowPollTimer);
-        fastPollCount = 0;
-        fastPollTimer = setInterval(() => {
-            fastPollCount += 1;
-            syncRuntimeLanguage();
-            if (fastPollCount >= 90) {
-                clearInterval(fastPollTimer);
-                fastPollTimer = null;
-                slowPollTimer = setInterval(syncRuntimeLanguage, 30000);
-            }
-        }, 1000);
-    }
-
-    startSyncLoop();
-    window.addEventListener('pageshow', syncRuntimeLanguage, { capture: true });
-    document.addEventListener('visibilitychange', syncRuntimeLanguage, { capture: true });
-})();
-`;
-    await fs.writeFile(path.join(extDir, 'runtime.js'), runtimeJs);
 
     // --- background.js ---
     const backgroundJs = `
 const PROFILE_ID = ${JSON.stringify(profileId || '')};
 const API_PORT = ${apiPort};
 const INIT_PASSWORDS = ${JSON.stringify(passwords)};
-const INIT_LANGUAGE_STATE = ${JSON.stringify(initialLanguageState)};
-const LANGUAGE_RULE_ID = 9101;
-const LANGUAGE_RESOURCE_TYPES = [
-    'main_frame',
-    'sub_frame',
-    'stylesheet',
-    'script',
-    'image',
-    'font',
-    'object',
-    'xmlhttprequest',
-    'ping',
-    'csp_report',
-    'media',
-    'websocket',
-    'other'
-];
-let lastLanguageStateKey = '';
-let runtimeLanguagePollTimer = null;
-let runtimeLanguagePollCount = 0;
 
 // 初始化密码数据
-chrome.runtime.onInstalled.addListener(() => { initPasswords(); startRuntimeLanguageSync(); });
-chrome.runtime.onStartup.addListener(() => { initPasswords(); startRuntimeLanguageSync(); });
-startRuntimeLanguageSync();
+chrome.runtime.onInstalled.addListener(() => { initPasswords(); });
+chrome.runtime.onStartup.addListener(() => { initPasswords(); });
 
 async function initPasswords() {
     const { geekez_passwords } = await chrome.storage.local.get('geekez_passwords');
@@ -2986,129 +2956,7 @@ function syncToElectron(passwords) {
       .catch(err => console.error('Sync to Electron falied:', err));
 }
 
-function normalizeRuntimeLanguageState(state) {
-    const enabled = !!state && !!state.enabled;
-    const acceptLanguageHeader = String(
-        state?.acceptLanguageHeader ||
-        state?.acceptLanguage ||
-        ''
-    ).trim();
-    const language = String(state?.language || '').trim();
-    const languages = Array.isArray(state?.languages)
-        ? state.languages.map(v => String(v || '').trim()).filter(Boolean)
-        : [];
-
-    if (!enabled || !acceptLanguageHeader || !language) {
-        return {
-            enabled: false,
-            language: '',
-            languages: [],
-            acceptLanguageHeader: '',
-            updatedAt: Number(state?.updatedAt || 0) || 0
-        };
-    }
-
-    return {
-        enabled: true,
-        language,
-        languages,
-        acceptLanguageHeader,
-        updatedAt: Number(state?.updatedAt || 0) || 0
-    };
-}
-
-function getLanguageStateKey(state) {
-    const normalized = normalizeRuntimeLanguageState(state);
-    return [
-        normalized.enabled ? '1' : '0',
-        normalized.language,
-        normalized.acceptLanguageHeader,
-        normalized.languages.join('|'),
-        normalized.updatedAt
-    ].join('::');
-}
-
-async function applyAcceptLanguageRule(state) {
-    const normalized = normalizeRuntimeLanguageState(state);
-    const api = chrome.declarativeNetRequest;
-    if (!api || typeof api.updateDynamicRules !== 'function') return;
-
-    if (!normalized.enabled) {
-        await api.updateDynamicRules({ removeRuleIds: [LANGUAGE_RULE_ID] });
-        return;
-    }
-
-    await api.updateDynamicRules({
-        removeRuleIds: [LANGUAGE_RULE_ID],
-        addRules: [{
-            id: LANGUAGE_RULE_ID,
-            priority: 100,
-            action: {
-                type: 'modifyHeaders',
-                requestHeaders: [{
-                    header: 'accept-language',
-                    operation: 'set',
-                    value: normalized.acceptLanguageHeader
-                }]
-            },
-            condition: {
-                regexFilter: '^https?://',
-                resourceTypes: LANGUAGE_RESOURCE_TYPES
-            }
-        }]
-    });
-}
-
-async function fetchRuntimeLanguageState() {
-    if (!PROFILE_ID) return normalizeRuntimeLanguageState(INIT_LANGUAGE_STATE);
-    const res = await fetch(\`http://127.0.0.1:\${API_PORT}/api/runtime/language?profileId=\${encodeURIComponent(PROFILE_ID)}&_=\${Date.now()}\`, {
-        method: 'GET',
-        cache: 'no-store'
-    });
-    if (!res.ok) throw new Error(\`runtime language HTTP \${res.status}\`);
-    return normalizeRuntimeLanguageState(await res.json());
-}
-
-async function syncRuntimeLanguage() {
-    try {
-        const state = await fetchRuntimeLanguageState();
-        const key = getLanguageStateKey(state);
-        if (key !== lastLanguageStateKey) {
-            await applyAcceptLanguageRule(state);
-            lastLanguageStateKey = key;
-        }
-    } catch (err) {
-        const fallbackKey = getLanguageStateKey(INIT_LANGUAGE_STATE);
-        if (fallbackKey !== lastLanguageStateKey) {
-            try {
-                await applyAcceptLanguageRule(INIT_LANGUAGE_STATE);
-                lastLanguageStateKey = fallbackKey;
-            } catch (e) { }
-        }
-    }
-}
-
-function startRuntimeLanguageSync() {
-    syncRuntimeLanguage();
-    if (runtimeLanguagePollTimer) {
-        clearInterval(runtimeLanguagePollTimer);
-    }
-    runtimeLanguagePollCount = 0;
-    runtimeLanguagePollTimer = setInterval(() => {
-        runtimeLanguagePollCount += 1;
-        syncRuntimeLanguage();
-        if (runtimeLanguagePollCount === 90) {
-            clearInterval(runtimeLanguagePollTimer);
-            runtimeLanguagePollTimer = setInterval(syncRuntimeLanguage, 30000);
-        }
-    }, 1000);
-}
-
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.type === 'SYNC_RUNTIME_LANGUAGE') {
-        syncRuntimeLanguage().then(() => sendResponse({ success: true })).catch(err => sendResponse({ success: false, error: err.message }));
-        return true;
-    }
     if (msg.type === 'QUERY_PASSWORDS') {
         getPasswords().then(pws => {
             const matches = pws.filter(p => msg.origin && p.origin === msg.origin);
@@ -5275,6 +5123,25 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             );
         }
 
+        const autoIpBasePolicy = getAutoIpBasePolicy(profile.fingerprint);
+        if (autoIpBasePolicy.enabled) {
+            updateLaunchProgress(
+                58,
+                preferredLang === 'en' ? 'Resolving IP-based fingerprint...' : '正在解析基于 IP 的指纹...',
+                true,
+                { step: 6, profileName: progressProfileName }
+            );
+            try {
+                const resolved = await resolveAutoIpBaseFingerprint(profileId, profile.fingerprint, localPort);
+                if (resolved && resolved.fingerprint) {
+                    profile.fingerprint = resolved.fingerprint;
+                    logAutoIpBaseResolution(profile.name, profileId, resolved);
+                }
+            } catch (err) {
+                console.warn(`[Auto IP Base] ${profile.name || profileId}: ${err?.message || err}`);
+            }
+        }
+
         updateLaunchProgress(
             66,
             preferredLang === 'en' ? 'Preparing fingerprint parameters...' : '正在准备指纹参数...',
@@ -5464,11 +5331,8 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         const getRuntimeLanguageState = () => {
             return buildRuntimeLanguageState(runtimeFingerprint);
         };
-        let geolocationScript = getGeolocationScript(runtimeFingerprint);
         let fingerprintInjectScript = getInjectScript(runtimeFingerprint, profile.name, style);
         const watermarkInjectScript = getWatermarkScript(profile.name, style);
-        let earlyAttachSession = null;
-        const earlyAttachSessions = new Set();
         const enableWebglOverride = !!(
             profile.fingerprint?.webglProfile !== 'none' &&
             profile.fingerprint?.webgl &&
@@ -5480,6 +5344,37 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             return `
 (() => {
   try {
+    const isGoogleAuthPage = (() => {
+      const isAuthHost = (host) => {
+        const value = String(host || '').toLowerCase();
+        return value === 'accounts.google.com' ||
+          value.endsWith('.accounts.google.com') ||
+          value === 'accounts.youtube.com' ||
+          value.endsWith('.accounts.youtube.com');
+      };
+      try {
+        const host = String(location.hostname || '').toLowerCase();
+        const path = String(location.pathname || '').toLowerCase();
+        if (isAuthHost(host)) return true;
+        if ((host === 'google.com' || host === 'www.google.com') && path.startsWith('/recaptcha/')) return true;
+      } catch (e) {}
+      try {
+        const ancestors = location.ancestorOrigins;
+        if (ancestors && typeof ancestors.length === 'number') {
+          for (let i = 0; i < ancestors.length; i += 1) {
+            try {
+              if (isAuthHost(new URL(ancestors[i]).hostname)) return true;
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+      try {
+        if (document.referrer && isAuthHost(new URL(document.referrer).hostname)) return true;
+      } catch (e) {}
+      return false;
+    })();
+    if (isGoogleAuthPage) return;
+
     const webglInfo = ${webglJson};
     const PATCHED_KEY = '__geekezDirectWebglPatched__';
     const debugExt = { UNMASKED_VENDOR_WEBGL: 37445, UNMASKED_RENDERER_WEBGL: 37446 };
@@ -5576,153 +5471,121 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         // Keep network headers, Intl locale and runtime fingerprint hooks aligned with profile settings.
         const applySessionOverrides = async (session, options = {}) => {
             if (!session) return;
-            const { includeScripts = false, resume = false } = options;
+            const { includeScripts = false, url = '' } = options;
+            const runtimeLanguage = getRuntimeLanguageState();
+            const safeMode = isGoogleAuthLikeUrl(url) || isPreNavigationUrl(url);
 
-            try {
-                if (includeScripts) {
-                    try {
-                        await session.send('Page.enable');
-                        await session.send('Page.addScriptToEvaluateOnNewDocument', { source: geolocationScript });
-                        await session.send('Page.addScriptToEvaluateOnNewDocument', { source: fingerprintInjectScript });
-                        await session.send('Page.addScriptToEvaluateOnNewDocument', { source: watermarkInjectScript });
-                        await session.send('Page.addScriptToEvaluateOnNewDocument', { source: webglOverrideScript });
-                    } catch (e) { }
-                }
-
-                try { await session.send('Network.enable'); } catch (e) { }
-
-                const runtimeLanguage = getRuntimeLanguageState();
-                if (runtimeLanguage.enabled) {
-                    try {
-                        await session.send('Network.setExtraHTTPHeaders', {
-                            headers: {
-                                'Accept-Language': runtimeLanguage.acceptLanguageHeader
-                            }
-                        });
-                    } catch (e) { }
-
-                    try {
-                        await session.send('Emulation.setLocaleOverride', { locale: runtimeLanguage.language });
-                    } catch (e) { }
-                }
-
-                if (runtimeFingerprint?.timezone && !isAutoTimezoneValue(runtimeFingerprint.timezone)) {
-                    try {
-                        await session.send('Emulation.setTimezoneOverride', { timezoneId: runtimeFingerprint.timezone });
-                    } catch (e) { }
-                }
-
-                if (profile.fingerprint?.userAgent) {
-                    const payload = {
-                        userAgent: profile.fingerprint.userAgent
-                    };
-                    if (runtimeLanguage.enabled) {
-                        payload.acceptLanguage = runtimeLanguage.acceptLanguageHeader;
-                    }
-                    if (profile.fingerprint?.platform) {
-                        payload.platform = profile.fingerprint.platform;
-                    }
-
-                    const metadata = profile.fingerprint?.userAgentMetadata;
-                    if (metadata && typeof metadata === 'object') {
-                        const md = {
-                            mobile: !!metadata.mobile
-                        };
-                        if (Array.isArray(metadata.brands)) md.brands = metadata.brands;
-                        if (Array.isArray(metadata.fullVersionList)) md.fullVersionList = metadata.fullVersionList;
-                        if (metadata.platform) md.platform = metadata.platform;
-                        if (metadata.platformVersion) md.platformVersion = metadata.platformVersion;
-                        if (metadata.architecture) md.architecture = metadata.architecture;
-                        if (metadata.model !== undefined) md.model = metadata.model;
-                        if (metadata.bitness) md.bitness = metadata.bitness;
-                        if (metadata.wow64 !== undefined) md.wow64 = !!metadata.wow64;
-                        if (metadata.uaFullVersion) md.fullVersion = metadata.uaFullVersion;
-                        payload.userAgentMetadata = md;
-                    }
-
-                    await session.send('Network.setUserAgentOverride', payload);
-                }
-            } finally {
-                if (resume) {
-                    try { await session.send('Runtime.runIfWaitingForDebugger'); } catch (e) { }
-                }
-            }
-        };
-
-        const installEarlyTargetOverrides = async () => {
-            try {
-                if (!browser || typeof browser.target !== 'function') return;
-                const browserTarget = browser.target();
-                if (!browserTarget || typeof browserTarget.createCDPSession !== 'function') return;
-
-                earlyAttachSession = await browserTarget.createCDPSession();
-                earlyAttachSession.on('Target.attachedToTarget', async (event = {}) => {
-                    const targetInfo = event.targetInfo || {};
-                    const sessionId = event.sessionId;
-                    if (targetInfo.type !== 'page' || !sessionId) return;
-
-                    let childSession = null;
-                    try {
-                        const connection = typeof earlyAttachSession.connection === 'function'
-                            ? earlyAttachSession.connection()
-                            : null;
-                        childSession = connection && typeof connection.session === 'function'
-                            ? connection.session(sessionId)
-                            : null;
-                        if (!childSession) return;
-
-                        earlyAttachSessions.add(childSession);
-                        await applySessionOverrides(childSession, {
-                            includeScripts: true,
-                            resume: true
-                        });
-                    } catch (err) {
-                        try {
-                            if (childSession) await childSession.send('Runtime.runIfWaitingForDebugger');
-                        } catch (e) { }
-                    }
-                });
-
-                earlyAttachSession.on('Target.detachedFromTarget', (event = {}) => {
-                    const sessionId = event.sessionId;
-                    for (const session of Array.from(earlyAttachSessions)) {
-                        try {
-                            if (typeof session.id === 'function' && session.id() === sessionId) {
-                                earlyAttachSessions.delete(session);
-                            }
-                        } catch (e) { }
-                    }
-                });
-
-                await earlyAttachSession.send('Target.setAutoAttach', {
-                    autoAttach: true,
-                    waitForDebuggerOnStart: true,
-                    flatten: true,
-                    filter: [{ type: 'page' }]
-                });
-            } catch (err) {
-                console.warn('Early target override failed:', err?.message || err);
-            }
-        };
-
-        const refreshEarlyTargetOverrides = async () => {
-            for (const session of Array.from(earlyAttachSessions)) {
+            if (includeScripts) {
                 try {
-                    if (session?.detached) {
-                        earlyAttachSessions.delete(session);
-                        continue;
-                    }
-                    await applySessionOverrides(session, { includeScripts: true });
+                    await session.send('Page.enable');
+                    await session.send('Page.addScriptToEvaluateOnNewDocument', { source: fingerprintInjectScript });
+                    await session.send('Page.addScriptToEvaluateOnNewDocument', { source: watermarkInjectScript });
+                    await session.send('Page.addScriptToEvaluateOnNewDocument', { source: webglOverrideScript });
                 } catch (e) { }
             }
+
+            try { await session.send('Network.enable'); } catch (e) { }
+
+            if (safeMode) {
+                try {
+                    await session.send('Network.setExtraHTTPHeaders', { headers: {} });
+                } catch (e) { }
+                try {
+                    await session.send('Emulation.setLocaleOverride', { locale: '' });
+                } catch (e) { }
+                try {
+                    await session.send('Emulation.setTimezoneOverride', { timezoneId: '' });
+                } catch (e) { }
+            } else if (runtimeLanguage.enabled) {
+                try {
+                    await session.send('Network.setExtraHTTPHeaders', {
+                        headers: {
+                            'Accept-Language': runtimeLanguage.acceptLanguageHeader
+                        }
+                    });
+                } catch (e) { }
+
+                try {
+                    await session.send('Emulation.setLocaleOverride', { locale: runtimeLanguage.language });
+                } catch (e) { }
+            }
+
+            if (runtimeFingerprint?.timezone && !isAutoTimezoneValue(runtimeFingerprint.timezone)) {
+                try {
+                    await session.send('Emulation.setTimezoneOverride', { timezoneId: runtimeFingerprint.timezone });
+                } catch (e) { }
+            }
+
+            if (profile.fingerprint?.userAgent) {
+                const payload = {
+                    userAgent: profile.fingerprint.userAgent
+                };
+                if (runtimeLanguage.enabled && !safeMode) {
+                    payload.acceptLanguage = runtimeLanguage.acceptLanguageHeader;
+                }
+                if (profile.fingerprint?.platform) {
+                    payload.platform = profile.fingerprint.platform;
+                }
+
+                const metadata = profile.fingerprint?.userAgentMetadata;
+                if (metadata && typeof metadata === 'object') {
+                    const md = {
+                        mobile: !!metadata.mobile
+                    };
+                    if (Array.isArray(metadata.brands)) md.brands = metadata.brands;
+                    if (Array.isArray(metadata.fullVersionList)) md.fullVersionList = metadata.fullVersionList;
+                    if (metadata.platform) md.platform = metadata.platform;
+                    if (metadata.platformVersion) md.platformVersion = metadata.platformVersion;
+                    if (metadata.architecture) md.architecture = metadata.architecture;
+                    if (metadata.model !== undefined) md.model = metadata.model;
+                    if (metadata.bitness) md.bitness = metadata.bitness;
+                    if (metadata.wow64 !== undefined) md.wow64 = !!metadata.wow64;
+                    if (metadata.uaFullVersion) md.fullVersion = metadata.uaFullVersion;
+                    payload.userAgentMetadata = md;
+                }
+
+                await session.send('Network.setUserAgentOverride', payload);
+            }
+        };
+
+        const pageOverrideSessions = new WeakMap();
+        const getPageOverrideSession = async (page) => {
+            let session = pageOverrideSessions.get(page);
+            if (!session) {
+                session = await page.createCDPSession();
+                pageOverrideSessions.set(page, session);
+            }
+            return session;
+        };
+
+        const applyPageRuntimeOverrides = async (page, includeScripts = false) => {
+            if (!page) return;
+            const session = await getPageOverrideSession(page);
+            await applySessionOverrides(session, {
+                includeScripts,
+                url: typeof page.url === 'function' ? page.url() : ''
+            });
+        };
+
+        const runtimeOverrideWatchedPages = new WeakSet();
+        const watchPageRuntimeOverrideNavigation = (page) => {
+            if (!page || runtimeOverrideWatchedPages.has(page) || typeof page.on !== 'function') return;
+            runtimeOverrideWatchedPages.add(page);
+            page.on('framenavigated', async (frame) => {
+                try {
+                    if (typeof page.mainFrame === 'function' && frame !== page.mainFrame()) return;
+                    await applyPageRuntimeOverrides(page, false);
+                } catch (e) { }
+            });
         };
 
         const applyPageOverrides = async (page) => {
             if (!page) return;
             try {
-                try {
-                    await page.evaluateOnNewDocument(geolocationScript);
-                } catch (e) { }
+                watchPageRuntimeOverrideNavigation(page);
+                const currentUrl = typeof page.url === 'function' ? page.url() : '';
+                const shouldEvaluateCurrentPage = !isGoogleAuthLikeUrl(currentUrl) && !isPreNavigationUrl(currentUrl);
+
                 try {
                     await page.evaluateOnNewDocument(fingerprintInjectScript);
                 } catch (e) { }
@@ -5733,21 +5596,19 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                     await page.evaluateOnNewDocument(webglOverrideScript);
                 } catch (e) { }
 
-                try {
-                    await page.evaluate(geolocationScript);
-                } catch (e) { }
-                try {
-                    await page.evaluate(fingerprintInjectScript);
-                } catch (e) { }
-                try {
-                    await page.evaluate(watermarkInjectScript);
-                } catch (e) { }
-                try {
-                    await page.evaluate(webglOverrideScript);
-                } catch (e) { }
+                if (shouldEvaluateCurrentPage) {
+                    try {
+                        await page.evaluate(fingerprintInjectScript);
+                    } catch (e) { }
+                    try {
+                        await page.evaluate(watermarkInjectScript);
+                    } catch (e) { }
+                    try {
+                        await page.evaluate(webglOverrideScript);
+                    } catch (e) { }
+                }
 
-                const session = await page.createCDPSession();
-                await applySessionOverrides(session, { includeScripts: true });
+                await applyPageRuntimeOverrides(page, true);
             } catch (err) {
                 const msg = String(err && err.message ? err.message : '');
                 if (msg.includes('No target with given id found') || msg.includes('Target closed')) {
@@ -5756,8 +5617,6 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                 console.warn('Page override failed:', msg);
             }
         };
-
-        await installEarlyTargetOverrides();
 
         try {
             const startupPages = await browser.pages();
@@ -5860,47 +5719,6 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         sender.send('profile-status', { id: profileId, status: 'running' });
         refreshTrayMenu().catch(() => { });
 
-        const applyAutoIpBaseRuntime = async () => {
-            const policy = getAutoIpBasePolicy(profile.fingerprint);
-            if (!policy.enabled) return;
-            try {
-                const resolved = await resolveAutoIpBaseFingerprintAfterLaunch(profileId, profile.fingerprint, localPort);
-                if (!resolved || !resolved.fingerprint) return;
-
-                runtimeFingerprint = resolved.fingerprint;
-                setProfileRuntimeLanguageState(profileId, runtimeFingerprint);
-                geolocationScript = getGeolocationScript(runtimeFingerprint);
-                fingerprintInjectScript = getInjectScript(runtimeFingerprint, profile.name, style);
-
-                try {
-                    await refreshEarlyTargetOverrides();
-                    const pages = await browser.pages();
-                    for (const page of pages) {
-                        await applyPageOverrides(page);
-                    }
-                } catch (e) { }
-
-                const parts = [];
-                if (resolved.policy.location && hasValidGeolocation(runtimeFingerprint.geolocation)) {
-                    parts.push(`geo=${runtimeFingerprint.geolocation.latitude},${runtimeFingerprint.geolocation.longitude}`);
-                }
-                if (resolved.policy.timezone && isValidTimezoneId(runtimeFingerprint.timezone)) {
-                    parts.push(`timezone=${runtimeFingerprint.timezone}`);
-                }
-                if (resolved.policy.language && canonicalizeLocale(runtimeFingerprint.language)) {
-                    parts.push(`language=${runtimeFingerprint.language}`);
-                }
-                console.log(`[Auto IP Base] ${profile.name || profileId}: ${resolved.cacheHit ? 'reused cache' : 'refreshed'} ip=${resolved.source.ip}${parts.length ? ` ${parts.join(' ')}` : ''}`);
-            } catch (err) {
-                console.warn(`[Auto IP Base] ${profile.name || profileId}: ${err?.message || err}`);
-            }
-        };
-        setTimeout(() => {
-            applyAutoIpBaseRuntime().catch((err) => {
-                console.warn(`[Auto IP Base] ${profile.name || profileId}: ${err?.message || err}`);
-            });
-        }, 0);
-
         // CDP Timezone Override (Windows only)
         // On macOS/Linux, TZ env var changes V8's timezone natively.
         // On Windows, V8 ignores TZ and uses Win32 API, so we use CDP instead.
@@ -5930,9 +5748,6 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             if (activeProcesses[profileId]) {
                 const pid = activeProcesses[profileId].xrayPid;
                 const logFd = activeProcesses[profileId].logFd;
-
-                try { await earlyAttachSession?.detach(); } catch (e) { }
-                earlyAttachSessions.clear();
 
                 // 关闭日志文件描述符
                 if (logFd !== undefined) {

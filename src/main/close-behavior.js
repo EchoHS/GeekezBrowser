@@ -1,28 +1,14 @@
-const CLOSE_BEHAVIOR = Object.freeze({
-    QUIT: 'quit',
-    TRAY: 'tray'
-});
-
-function normalizeCloseBehavior(value) {
-    return String(value || '').toLowerCase() === CLOSE_BEHAVIOR.QUIT
-        ? CLOSE_BEHAVIOR.QUIT
-        : CLOSE_BEHAVIOR.TRAY;
-}
-
-function shouldKeepAppResident(value) {
-    return normalizeCloseBehavior(value) === CLOSE_BEHAVIOR.TRAY;
-}
-
-function decideCloseAction(value, options = {}) {
-    const hasTrayEntry = options.hasTrayEntry !== false;
-    return shouldKeepAppResident(value) && hasTrayEntry
-        ? CLOSE_BEHAVIOR.TRAY
-        : CLOSE_BEHAVIOR.QUIT;
-}
-
-module.exports = {
-    CLOSE_BEHAVIOR,
-    decideCloseAction,
-    normalizeCloseBehavior,
-    shouldKeepAppResident
-};
+const CLOSE_BEHAVIOR = { QUIT: 'quit', TRAY: 'tray' };
+const normalizeCloseBehavior = (value) => {
+    const choice = String(value || '').trim().toLowerCase();
+    return choice === CLOSE_BEHAVIOR.QUIT ? CLOSE_BEHAVIOR.QUIT : CLOSE_BEHAVIOR.TRAY;
+}; // normalizeCloseBehavior
+const shouldKeepAppResident = (value) => normalizeCloseBehavior(value) === CLOSE_BEHAVIOR.TRAY;
+const decideCloseAction = (value, options = {}) => {
+    const trayReady = options.hasTrayEntry !== false;
+    return shouldKeepAppResident(value) && trayReady ? CLOSE_BEHAVIOR.TRAY : CLOSE_BEHAVIOR.QUIT;
+}; // decideCloseAction
+exports.CLOSE_BEHAVIOR = CLOSE_BEHAVIOR;
+exports.decideCloseAction = decideCloseAction;
+exports.normalizeCloseBehavior = normalizeCloseBehavior;
+exports.shouldKeepAppResident = shouldKeepAppResident;

@@ -777,6 +777,36 @@ function getInjectScript(fp, profileName, watermarkStyle) {
     (function() {
         try {
             const fp = ${fpJson};
+            const isGoogleAuthPage = (() => {
+                const isAuthHost = (host) => {
+                    const value = String(host || '').toLowerCase();
+                    return value === 'accounts.google.com' ||
+                        value.endsWith('.accounts.google.com') ||
+                        value === 'accounts.youtube.com' ||
+                        value.endsWith('.accounts.youtube.com');
+                };
+                try {
+                    const host = String(location.hostname || '').toLowerCase();
+                    const path = String(location.pathname || '').toLowerCase();
+                    if (isAuthHost(host)) return true;
+                    if ((host === 'www.google.com' || host === 'google.com') && path.startsWith('/recaptcha/')) return true;
+                } catch (e) { }
+                try {
+                    const ancestors = location.ancestorOrigins;
+                    if (ancestors && typeof ancestors.length === 'number') {
+                        for (let i = 0; i < ancestors.length; i += 1) {
+                            try {
+                                if (isAuthHost(new URL(ancestors[i]).hostname)) return true;
+                            } catch (e) { }
+                        }
+                    }
+                } catch (e) { }
+                try {
+                    if (document.referrer && isAuthHost(new URL(document.referrer).hostname)) return true;
+                } catch (e) { }
+                return false;
+            })();
+            if (isGoogleAuthPage) return;
 
             const makeNative = (func, name) => {
                 const nativeStr = 'function ' + name + '() { [native code] }';
@@ -939,6 +969,8 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                     timestamp: Date.now()
                 });
 
+                // Match Location Guard's low-risk shape: leave Geolocation.prototype
+                // native and replace only the current navigator.geolocation methods.
                 const fakeGetCurrentPosition = function getCurrentPosition(success, error, options) {
                     const position = {
                         ...buildPosition()
@@ -948,41 +980,26 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                     }, 12);
                 };
 
-                const watchTimers = new Map();
                 const fakeWatchPosition = function watchPosition(success, error, options) {
-                    const watchId = Math.floor(Math.random() * 100000) + 1;
                     fakeGetCurrentPosition(success, error, options);
-                    if (typeof success === 'function') {
-                        watchTimers.set(watchId, setInterval(() => {
-                            try { success(buildPosition()); } catch (e) { }
-                        }, 10000));
-                    }
-                    return watchId;
-                };
-
-                const fakeClearWatch = function clearWatch(watchId) {
-                    if (watchTimers.has(watchId)) {
-                        clearInterval(watchTimers.get(watchId));
-                        watchTimers.delete(watchId);
-                    }
+                    return Math.floor(Math.random() * 10000) + 1;
                 };
 
                 try {
-                    Object.defineProperty(Geolocation.prototype, 'getCurrentPosition', {
-                        value: makeNative(fakeGetCurrentPosition, 'getCurrentPosition'),
-                        configurable: true,
-                        writable: true
-                    });
-                    Object.defineProperty(Geolocation.prototype, 'watchPosition', {
-                        value: makeNative(fakeWatchPosition, 'watchPosition'),
-                        configurable: true,
-                        writable: true
-                    });
-                    Object.defineProperty(Geolocation.prototype, 'clearWatch', {
-                        value: makeNative(fakeClearWatch, 'clearWatch'),
-                        configurable: true,
-                        writable: true
-                    });
+                    if (navigator.geolocation) {
+                        navigator.geolocation.getCurrentPosition = fakeGetCurrentPosition;
+                        navigator.geolocation.watchPosition = fakeWatchPosition;
+                        if (typeof navigator.geolocation.clearWatch === 'function') {
+                            const originalClearWatch = navigator.geolocation.clearWatch;
+                            navigator.geolocation.clearWatch = function clearWatch(watchId) {
+                                try {
+                                    return originalClearWatch.call(navigator.geolocation, watchId);
+                                } catch (e) {
+                                    return undefined;
+                                }
+                            };
+                        }
+                    }
                 } catch (e) { }
             }
 
@@ -1638,102 +1655,6 @@ function getInjectScript(fp, profileName, watermarkStyle) {
     `;
 }
 
-function getGeolocationScript(fp) {
-    const normalizedFp = generateFingerprint(fp || {});
-    const geo = normalizedFp.geolocation;
-    if (!geo || typeof geo.latitude !== 'number' || typeof geo.longitude !== 'number') {
-        return '(() => {})();';
-    }
-
-    const geoJson = JSON.stringify({
-        latitude: geo.latitude,
-        longitude: geo.longitude,
-        accuracy: geo.accuracy || 100
-    });
-
-    return `
-    (function() {
-        try {
-            const geo = ${geoJson};
-            if (!window.Geolocation || !Geolocation.prototype) return;
-
-            const makeNative = (func, name) => {
-                const nativeStr = 'function ' + name + '() { [native code] }';
-                Object.defineProperty(func, 'toString', {
-                    value: function() { return nativeStr; },
-                    configurable: true,
-                    writable: true
-                });
-                Object.defineProperty(func.toString, 'toString', {
-                    value: function() { return 'function toString() { [native code] }'; },
-                    configurable: true,
-                    writable: true
-                });
-                return func;
-            };
-
-            const latitude = geo.latitude;
-            const longitude = geo.longitude;
-            const accuracy = geo.accuracy || 100;
-            const watchTimers = new Map();
-
-            const buildPosition = () => ({
-                coords: {
-                    latitude: latitude + (Math.random() - 0.5) * 0.005,
-                    longitude: longitude + (Math.random() - 0.5) * 0.005,
-                    accuracy,
-                    altitude: null,
-                    altitudeAccuracy: null,
-                    heading: null,
-                    speed: null
-                },
-                timestamp: Date.now()
-            });
-
-            const fakeGetCurrentPosition = function getCurrentPosition(success, error, options) {
-                setTimeout(() => {
-                    if (typeof success === 'function') success(buildPosition());
-                }, 12);
-            };
-
-            const fakeWatchPosition = function watchPosition(success, error, options) {
-                const watchId = Math.floor(Math.random() * 100000) + 1;
-                fakeGetCurrentPosition(success, error, options);
-                if (typeof success === 'function') {
-                    watchTimers.set(watchId, setInterval(() => {
-                        try { success(buildPosition()); } catch (e) { }
-                    }, 10000));
-                }
-                return watchId;
-            };
-
-            const fakeClearWatch = function clearWatch(watchId) {
-                if (watchTimers.has(watchId)) {
-                    clearInterval(watchTimers.get(watchId));
-                    watchTimers.delete(watchId);
-                }
-            };
-
-            Object.defineProperty(Geolocation.prototype, 'getCurrentPosition', {
-                value: makeNative(fakeGetCurrentPosition, 'getCurrentPosition'),
-                configurable: true,
-                writable: true
-            });
-            Object.defineProperty(Geolocation.prototype, 'watchPosition', {
-                value: makeNative(fakeWatchPosition, 'watchPosition'),
-                configurable: true,
-                writable: true
-            });
-            Object.defineProperty(Geolocation.prototype, 'clearWatch', {
-                value: makeNative(fakeClearWatch, 'clearWatch'),
-                configurable: true,
-                writable: true
-            });
-        } catch (e) { }
-    })();
-    `;
-}
-
 function getWatermarkScript(profileName, watermarkStyle) {
     const safeProfileName = (profileName || 'Profile').replace(/[<>"'&]/g, '');
     const style = watermarkStyle === 'banner' || watermarkStyle === 'off' ? watermarkStyle : 'enhanced';
@@ -1754,6 +1675,36 @@ function getWatermarkScript(profileName, watermarkStyle) {
     return `
     (function() {
         try {
+            const isGoogleAuthPage = (() => {
+                const isAuthHost = (host) => {
+                    const value = String(host || '').toLowerCase();
+                    return value === 'accounts.google.com' ||
+                        value.endsWith('.accounts.google.com') ||
+                        value === 'accounts.youtube.com' ||
+                        value.endsWith('.accounts.youtube.com');
+                };
+                try {
+                    const host = String(location.hostname || '').toLowerCase();
+                    const path = String(location.pathname || '').toLowerCase();
+                    if (isAuthHost(host)) return true;
+                    if ((host === 'www.google.com' || host === 'google.com') && path.startsWith('/recaptcha/')) return true;
+                } catch (e) { }
+                try {
+                    const ancestors = location.ancestorOrigins;
+                    if (ancestors && typeof ancestors.length === 'number') {
+                        for (let i = 0; i < ancestors.length; i += 1) {
+                            try {
+                                if (isAuthHost(new URL(ancestors[i]).hostname)) return true;
+                            } catch (e) { }
+                        }
+                    }
+                } catch (e) { }
+                try {
+                    if (document.referrer && isAuthHost(new URL(document.referrer).hostname)) return true;
+                } catch (e) { }
+                return false;
+            })();
+            if (isGoogleAuthPage) return;
             if (window.__geekezWatermarkBootstrapped__) return;
             window.__geekezWatermarkBootstrapped__ = true;
 
@@ -1845,4 +1796,4 @@ function getWatermarkScript(profileName, watermarkStyle) {
     `;
 }
 
-export { generateFingerprint, getInjectScript, getGeolocationScript, getWatermarkScript };
+export { generateFingerprint, getInjectScript, getWatermarkScript };
