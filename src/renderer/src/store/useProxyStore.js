@@ -176,7 +176,7 @@ export const useProxyStore = defineStore('proxy', () => {
             settings.value.subscriptions.push(subData);
             settings.value.preProxies = settings.value.preProxies.concat(res.nodes);
             await saveSettings();
-            return { success: true, count: res.count };
+            return { success: true, count: res.count, unsupportedInsecureCount: res.unsupportedInsecureCount || 0 };
         }
         return { success: false, error: res.error };
     };
@@ -188,7 +188,7 @@ export const useProxyStore = defineStore('proxy', () => {
             const res = await syncSub(subData.id);
             if (res && !res.success) return res;
             await saveSettings();
-            return { success: true };
+            return { success: true, unsupportedInsecureCount: res?.unsupportedInsecureCount || 0 };
         }
         return { success: false, error: 'Not found' };
     };

@@ -141,7 +141,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useUIStore } from '../store/useUIStore';
 import { useProxyStore } from '../store/useProxyStore';
-import { getProxyRemark } from '../utils/helpers';
+import { getProxyRemark, getUnsupportedXrayInsecureWarning } from '../utils/helpers';
 
 const uiStore = useUIStore();
 const proxyStore = useProxyStore();
@@ -237,18 +237,25 @@ const handleSubmitEditNode = async () => {
     }
 
     const remark = String(editNodeForm.value.remark || '').trim();
+    const insecureWarning = getUnsupportedXrayInsecureWarning([url]);
     target.url = url;
     target.remark = remark || getProxyRemark(url) || target.remark || 'Node';
     await proxyStore.saveSettings();
     closeEditNodeModal();
+    if (insecureWarning) {
+        uiStore.showAlert(insecureWarning);
+    }
 };
 
 const handleSubmitBatch = async () => {
     if (!batchInput.value.trim()) return;
-    
+
+    const insecureWarning = getUnsupportedXrayInsecureWarning(batchInput.value);
     const count = await proxyStore.batchAddProxy(batchInput.value, proxyStore.currentGroup);
     if (count > 0) {
-        uiStore.showAlert(window.t('batchAddSuccess') || `Successfully added ${count} nodes.`);
+        let message = window.t('batchAddSuccess') || `Successfully added ${count} nodes.`;
+        if (insecureWarning) message += `\n\n${insecureWarning}`;
+        uiStore.showAlert(message);
         batchInput.value = '';
         uiStore.batchAddProxyModalVisible = false;
         await proxyStore.loadSettings();

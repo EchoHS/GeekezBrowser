@@ -1,5 +1,10 @@
 import { ipcService } from './ipc.service';
-import { decodeBase64Content, getProxyRemark, uuidv4 } from '../utils/helpers';
+import {
+    countUnsupportedXrayInsecureLinks,
+    decodeBase64Content,
+    getProxyRemark,
+    uuidv4
+} from '../utils/helpers';
 
 /**
  * 代理与订阅服务 - 处理节点测试、订阅同步与数据解析
@@ -59,10 +64,12 @@ export const proxyService = {
             const lines = decoded.split(/[\r\n]+/);
             const newNodes = [];
             let count = 0;
+            let unsupportedInsecureCount = 0;
 
             lines.forEach(line => {
                 line = line.trim();
                 if (line && line.includes('://')) {
+                    unsupportedInsecureCount += countUnsupportedXrayInsecureLinks([line]);
                     const remark = getProxyRemark(line) || `Node ${count + 1}`;
                     newNodes.push({
                         id: uuidv4(),
@@ -75,7 +82,7 @@ export const proxyService = {
                 }
             });
 
-            return { success: true, count, nodes: newNodes };
+            return { success: true, count, nodes: newNodes, unsupportedInsecureCount };
         } catch (error) {
             console.error('[Proxy Service] Sync failed:', error);
             return { success: false, error: error.message || 'Update failed' };

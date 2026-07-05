@@ -61,7 +61,6 @@ function parseProxyLink(link, tag) {
                 outbound.streamSettings.tlsSettings = {
                     serverName: vmess.sni || vmess.host,
                     fingerprint: "chrome",
-                    allowInsecure: true,
                     alpn: vmess.alpn ? vmess.alpn.split(',') : undefined
                 };
             }
@@ -108,7 +107,6 @@ function parseProxyLink(link, tag) {
                 outbound.streamSettings.tlsSettings = {
                     serverName: params.get("sni") || params.get("host") || urlObj.hostname,
                     fingerprint: params.get("fp") || "chrome",
-                    allowInsecure: true,
                     alpn: params.get("alpn") ? params.get("alpn").split(',') : undefined
                 };
             } else if (security === 'reality') {
@@ -132,7 +130,7 @@ function parseProxyLink(link, tag) {
             outbound.streamSettings = {
                 network: type,
                 security: params.get("security") || "tls",
-                tlsSettings: { serverName: params.get("sni") || urlObj.hostname, fingerprint: "chrome", allowInsecure: true },
+                tlsSettings: { serverName: params.get("sni") || urlObj.hostname, fingerprint: "chrome" },
                 wsSettings: type === 'ws' ? { path: params.get("path"), headers: { Host: params.get("host") } } : undefined,
                 grpcSettings: type === 'grpc' ? { serviceName: params.get("serviceName") } : undefined
             };
@@ -272,8 +270,7 @@ function parseProxyLink(link, tag) {
                             network: "tcp",
                             security: "tls",
                             tlsSettings: {
-                                serverName: obfsHost || host,
-                                allowInsecure: true
+                                serverName: obfsHost || host
                             }
                         };
                     }

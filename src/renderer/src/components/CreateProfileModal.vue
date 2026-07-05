@@ -120,7 +120,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useUIStore } from '../store/useUIStore';
 import { useProfileStore } from '../store/useProfileStore';
-import { getProxyRemark } from '../utils/helpers';
+import { getProxyRemark, getUnsupportedXrayInsecureWarning } from '../utils/helpers';
 import {
   browserVersionPresetOptions,
   webglProfileOptions,
@@ -337,6 +337,7 @@ async function handleSave() {
     uiStore.showAlert(window.t('inputReq'));
     return;
   }
+  const insecureWarning = getUnsupportedXrayInsecureWarning(proxyLines);
 
   isSaving.value = true;
   try {
@@ -366,8 +367,10 @@ async function handleSave() {
     }
 
     uiStore.closeAddModal();
-    if (proxyLines.length > 1) {
-      uiStore.showAlert(`Batch created successfully: ${createdCount}`);
+    if (proxyLines.length > 1 || insecureWarning) {
+      let message = proxyLines.length > 1 ? `Batch created successfully: ${createdCount}` : '';
+      if (insecureWarning) message = message ? `${message}\n\n${insecureWarning}` : insecureWarning;
+      uiStore.showAlert(message);
     }
   } catch (err) {
     console.error('Create profile failed:', err);

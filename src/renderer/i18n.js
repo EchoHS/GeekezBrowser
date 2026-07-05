@@ -225,6 +225,7 @@ const enTranslations = {
     batchAdd: "Batch Add Nodes",
     modeSwitched: "Proxy mode switched",
     proxyConfigApplied: "Configuration applied",
+    unsupportedXrayInsecureWarn: "Xray-core no longer supports insecure/allowInsecure=1. The original link was kept, but this parameter will be ignored at runtime. Affected nodes: {count}.",
     launchingStatus: "LAUNCHING",
     launchingProfileTitle: "Launching Profile",
     launchingWarn: "Please wait while the environment is starting. Do not close the application.",

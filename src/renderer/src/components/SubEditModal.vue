@@ -40,7 +40,7 @@
 import { ref, reactive, watch } from 'vue';
 import { useUIStore } from '../store/useUIStore';
 import { useProxyStore } from '../store/useProxyStore';
-import { uuidv4 } from '../utils/helpers';
+import { formatUnsupportedXrayInsecureWarning, uuidv4 } from '../utils/helpers';
 
 const uiStore = useUIStore();
 const proxyStore = useProxyStore();
@@ -121,7 +121,10 @@ const handleSave = async () => {
         if (isNew.value) {
             const res = await proxyStore.addSubscription(subData);
             if (res.success) {
-                uiStore.showAlert((t('msgImported') || 'Imported') + ' ' + res.count + ' ' + (t('msgNodes') || 'nodes.'));
+                const insecureWarning = formatUnsupportedXrayInsecureWarning(res.unsupportedInsecureCount || 0);
+                let message = (t('msgImported') || 'Imported') + ' ' + res.count + ' ' + (t('msgNodes') || 'nodes.');
+                if (insecureWarning) message += `\n\n${insecureWarning}`;
+                uiStore.showAlert(message);
                 uiStore.subEditModalVisible = false;
             } else {
                 uiStore.showAlert((t('subErr') || 'Failed to parse subscription.') + ' ' + (res.error || ''));
@@ -129,7 +132,9 @@ const handleSave = async () => {
         } else {
             const res = await proxyStore.updateSubscription(subData);
             if (res.success) {
+                const insecureWarning = formatUnsupportedXrayInsecureWarning(res.unsupportedInsecureCount || 0);
                 uiStore.subEditModalVisible = false;
+                if (insecureWarning) uiStore.showAlert(insecureWarning);
             } else {
                 uiStore.showAlert((t('msgUpdateFailed') || 'Update Failed:') + ' ' + (res.error || ''));
             }

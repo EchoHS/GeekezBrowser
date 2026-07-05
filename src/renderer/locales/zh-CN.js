@@ -227,6 +227,7 @@ window.zhCN = {
     batchAdd: "批量添加节点",
     modeSwitched: "代理模式已切换",
     proxyConfigApplied: "配置已生效",
+    unsupportedXrayInsecureWarn: "当前 Xray-core 已不支持 insecure/allowInsecure=1。原始链接已保留，但运行时会忽略该参数。受影响节点数：{count}。",
     launchingStatus: "启动中",
     launchingProfileTitle: "正在启动环境",
     launchingWarn: "环境启动中，请稍候，不要关闭软件。",

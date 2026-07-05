@@ -116,6 +116,7 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useUIStore } from '../store/useUIStore';
 import { useProfileStore } from '../store/useProfileStore';
+import { getUnsupportedXrayInsecureWarning } from '../utils/helpers';
 import {
   browserVersionPresetOptions,
   webglProfileOptions,
@@ -294,6 +295,7 @@ async function handleSave() {
     const p = profileStore.profiles.find(x => x.id === uiStore.currentEditId);
     if (!p) return;
     const browserPreset = parseBrowserVersionPreset(form.browserVersionPreset);
+    const insecureWarning = getUnsupportedXrayInsecureWarning([form.proxyStr]);
 
     const tagsRaw = (form.tags || '').toString();
     const updated = {
@@ -328,6 +330,9 @@ async function handleSave() {
     const safeUpdated = JSON.parse(JSON.stringify(updated));
     await profileStore.updateProfile(safeUpdated);
     uiStore.closeEditModal();
+    if (insecureWarning) {
+      uiStore.showAlert(insecureWarning);
+    }
   } catch (err) {
     console.error('Update profile failed:', err);
     uiStore.showAlert("Update Failed: " + err.message);
