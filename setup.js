@@ -237,7 +237,7 @@ async function main() {
         // 2. 准备 Chrome
         process.stdout.write('⬇️  Downloading Chrome...\n');
         const { install } = require('@puppeteer/browsers');
-        const BUILD_ID = '147.0.7727.50';
+        const BUILD_ID = '150.0.7871.115';
         const DOWNLOAD_ROOT = path.join(__dirname, 'resources', 'puppeteer');
         const MIRROR_URL = 'https://npmmirror.com/mirrors/chrome-for-testing';
 

@@ -43,8 +43,8 @@ const listDirectories = (folder) => {
     }; // listDirectories
 }; // listDirectories
 const getPuppeteerRoot = ({ isDev, appPath, resourcesPath } = {}) => {
-    const base = isDev ? appPath : resourcesPath;
-    return base ? joinPath(base, 'resources', 'puppeteer') : '';
+    if (isDev) return appPath ? joinPath(appPath, 'resources', 'puppeteer') : '';
+    return resourcesPath ? joinPath(resourcesPath, 'puppeteer') : '';
 }; // getPuppeteerRoot
 const bundledBrowserPaths = (root, platform = process.platform) => {
     const layout = {

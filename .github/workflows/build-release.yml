@@ -90,7 +90,7 @@ jobs:
           [ "${{ matrix.os }}" != "win32" ] && chmod +x "$BIN_DIR/xray" || true
 
       - name: Download Chrome
-        run: npx @puppeteer/browsers install chrome@147.0.7727.50 --path resources/puppeteer
+        run: npx @puppeteer/browsers install chrome@150.0.7871.115 --path resources/puppeteer
 
       - name: Build macOS
         if: matrix.os == 'darwin'
