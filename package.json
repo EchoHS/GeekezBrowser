@@ -4,6 +4,7 @@
   "description": "Stealthy Anti-Detect Browser for E-Commerce",
   "main": "out/main/index.js",
   "author": "EchoHS",
+  "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

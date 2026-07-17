@@ -101,7 +101,8 @@ export const useUIStore = defineStore('ui', () => {
         const themeColors = {
             'geek': { bg: '#1e1e2d', symbol: '#ffffff' },
             'light': { bg: '#f0f2f5', symbol: '#000000' },
-            'dark': { bg: '#121212', symbol: '#ffffff' }
+            'dark': { bg: '#121212', symbol: '#ffffff' },
+            'tech-gray': { bg: '#eef8ff', symbol: '#1b2a40' }
         };
         const colors = themeColors[newTheme] || themeColors['geek'];
         ipcService.setTitleBarColor(colors);

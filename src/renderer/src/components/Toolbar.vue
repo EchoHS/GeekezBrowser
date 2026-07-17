@@ -32,7 +32,12 @@
 
     <div class="sub-toolbar">
         <div class="sub-left">
-            <button @click="openAddModal" style="background:var(--accent);color:var(--bg-color);">+ {{ $t('newProfile') }}</button>
+            <button @click="openAddModal">
+                <svg class="essentials-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                    <path d="M12 5v14M5 12h14" />
+                </svg>
+                {{ $t('newProfile') }}
+            </button>
             <button class="outline" @click="toggleSelectAllFiltered">
                 {{ allFilteredSelected ? t('unselectFiltered') : t('selectFiltered') }}
             </button>

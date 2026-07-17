@@ -23,6 +23,7 @@
                 <option value="geek">{{ $t('themeGeek') }}</option>
                 <option value="light">{{ $t('themeLight') }}</option>
                 <option value="dark">{{ $t('themeDark') }}</option>
+                <option value="tech-gray">{{ $t('themeTechGray') }}</option>
             </select>
             <div class="icon-btn" @click="openGithub" title="Github"><svg viewBox="0 0 24 24" width="20" height="20"
                     fill="currentColor">
@@ -267,11 +268,19 @@ const toggleLang = () => {
 };
 
 onMounted(() => {
-    document.body.setAttribute('data-theme', uiStore.theme);
+    uiStore.setTheme(uiStore.theme);
     ipcService.getAppInfo()
         .then((info) => {
             if (info && info.version) {
                 appVersion.value = `v${info.version}`;
+            }
+            if (info && info.platform) {
+                document.documentElement.dataset.platform = info.platform;
+            }
+            if (info && info.nativeGlass) {
+                document.documentElement.dataset.nativeGlass = 'true';
+            } else {
+                delete document.documentElement.dataset.nativeGlass;
             }
         })
         .catch(() => { });

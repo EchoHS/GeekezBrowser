@@ -57,7 +57,7 @@ const enTranslations = {
     remark: "Remark",
     latency: "Latency",
     testWait: "...",
-    themeGeek: "Geek (Blue)", themeLight: "Light (Red)", themeDark: "Dark (Green)",
+    themeGeek: "Geek", themeLight: "Light", themeDark: "Dark", themeTechGray: "Essentials",
     btnImportSub: "+ New Sub",
     btnTestGroup: "⚡ Test Group & Auto-Switch",
     btnTest: "Test",

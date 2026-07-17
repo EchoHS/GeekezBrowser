@@ -4,7 +4,8 @@
 
 <img src="src/renderer/icon.png" width="100" height="100" alt="GeekEZ Logo">
 
-[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+[![Code License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/Code%20License-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
+[![Brand Assets: CC BY-NC-SA 4.0](https://img.shields.io/badge/Brand%20Assets-CC%20BY--NC--SA%204.0-lightgrey.svg)](ASSET-LICENSE.md)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
 **A fingerprint stealth browser built for e-commerce operations and multi-account management**
@@ -136,7 +137,14 @@ This software is for technical research and educational purposes only. The devel
 
 ## 📝 License
 
-This project is licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+GeekEZ Browser is **source-available**, not OSI-approved open-source software.
+
+- **Source code:** Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). Personal and qualifying noncommercial use is permitted; **any commercial use requires a separate written commercial license**.
+- **Logos, icons, and brand artwork:** Licensed under [CC BY-NC-SA 4.0](ASSET-LICENSE.md) for noncommercial copyright use.
+- **Trademarks:** The GeekEZ name and brand identifiers remain protected and are not licensed by Creative Commons. See [TRADEMARKS.md](TRADEMARKS.md).
+- **Commercial licensing:** See [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md) to request authorization.
+
+Third-party components remain subject to their respective licenses.
 
 ## 💬 Community
 [*QQ Group: 1079216892*](tencent://groupwpa/?subcmd=all&uin=1079216892)
@@ -145,8 +153,8 @@ This project is licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/lic
 
 <a href="https://www.star-history.com/?repos=EchoHS%2FGeekezBrowser&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=EchoHS/GeekezBrowser&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=EchoHS/GeekezBrowser&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=EchoHS/GeekezBrowser&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=EchoHS/GeekezBrowser&type=date&theme=dark&legend=top-left&sealed_token=6pGlxeLVF-CkUfvKDldMx_8SwJovSNjgK59gCn2pXVZv_m7qeB93fjWSZYy188A8t-P0pwNdGkW4d8cJSq6t2DFZF5NMhbmTNICZM4QAwHpM98Q-g6JmYtoe2Z4p4TILseeW-YEaZr-2EkyPEWWWQNj-9sRCgQenQpQ8Gyn5zBvzwWNz2t81gdjsy5HX" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=EchoHS/GeekezBrowser&type=date&legend=top-left&sealed_token=6pGlxeLVF-CkUfvKDldMx_8SwJovSNjgK59gCn2pXVZv_m7qeB93fjWSZYy188A8t-P0pwNdGkW4d8cJSq6t2DFZF5NMhbmTNICZM4QAwHpM98Q-g6JmYtoe2Z4p4TILseeW-YEaZr-2EkyPEWWWQNj-9sRCgQenQpQ8Gyn5zBvzwWNz2t81gdjsy5HX" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=EchoHS/GeekezBrowser&type=date&legend=top-left&sealed_token=6pGlxeLVF-CkUfvKDldMx_8SwJovSNjgK59gCn2pXVZv_m7qeB93fjWSZYy188A8t-P0pwNdGkW4d8cJSq6t2DFZF5NMhbmTNICZM4QAwHpM98Q-g6JmYtoe2Z4p4TILseeW-YEaZr-2EkyPEWWWQNj-9sRCgQenQpQ8Gyn5zBvzwWNz2t81gdjsy5HX" />
  </picture>
 </a>

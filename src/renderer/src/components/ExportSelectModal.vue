@@ -52,7 +52,7 @@
                 <button class="outline" @click="uiStore.closeExportSelectModal()"
                     style="padding: 8px 20px;">{{ t('cancel') || '取消' }}</button>
                 <button @click="confirmExport" :disabled="isExporting"
-                    style="padding: 8px 24px; background: var(--accent); color: var(--bg-color); font-weight: 600;">
+                    style="padding: 8px 24px; font-weight: 600;">
                     {{ isExporting ? '...' : (t('expConfirm') || '导出') }}
                 </button>
             </div>

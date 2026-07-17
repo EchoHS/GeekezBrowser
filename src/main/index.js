@@ -16,6 +16,7 @@ const chromiumLocator = require('./chromium-path');
 const { CLOSE_BEHAVIOR, decideCloseAction, normalizeCloseBehavior } = require('./close-behavior');
 const { fetchLatestGitHubReleaseInfo } = require('./release-check');
 const xrayRelease = require('./xray-assets');
+const { supportsNativeGlass, getMainWindowMaterialOptions } = require('./native-glass');
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
 const initSqlJs = require('sql.js');
@@ -2791,12 +2792,16 @@ async function createTray() {
 
 function createWindow() {
     const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+    const systemVersion = typeof app.getSystemVersion === 'function' ? app.getSystemVersion() : '';
+    const materialOptions = getMainWindowMaterialOptions(process.platform, systemVersion);
     const win = new BrowserWindow({
         width: Math.round(width * 0.5), height: Math.round(height * 0.601), minWidth: 900, minHeight: 600,
-        title: "GeekEZ Browser", backgroundColor: '#1e1e2d',
+        title: "GeekEZ Browser",
         icon: resolveWindowIconPath(),
-        titleBarOverlay: { color: '#1e1e2d', symbolColor: '#ffffff', height: 35 },
-        titleBarStyle: 'hidden',
+        ...(process.platform !== 'darwin'
+            ? { titleBarOverlay: { color: '#1e1e2d', symbolColor: '#ffffff', height: 35 } }
+            : {}),
+        ...materialOptions,
         webPreferences: { 
             preload: path.join(__dirname, '../preload/index.js'), 
             contextIsolation: true, 
@@ -3313,7 +3318,16 @@ app.on('activate', () => {
 });
 
 // IPC Handles
-ipcMain.handle('get-app-info', () => { return { name: app.getName(), version: app.getVersion() }; });
+ipcMain.handle('get-app-info', () => {
+    const systemVersion = typeof app.getSystemVersion === 'function' ? app.getSystemVersion() : '';
+    return {
+        name: app.getName(),
+        version: app.getVersion(),
+        platform: process.platform,
+        systemVersion,
+        nativeGlass: supportsNativeGlass(process.platform, systemVersion)
+    };
+});
 
 // Check for updates via GitHub Releases API
 ipcMain.handle('check-updates', async () => {
@@ -3759,7 +3773,21 @@ ipcMain.handle('test-proxy-latency-batch', async (_e, entries) => {
         return { id, ...result };
     });
 });
-ipcMain.handle('set-title-bar-color', (e, colors) => { const win = BrowserWindow.fromWebContents(e.sender); if (win) { if (process.platform === 'win32') try { win.setTitleBarOverlay({ color: colors.bg, symbolColor: colors.symbol }); } catch (e) { } win.setBackgroundColor(colors.bg); } });
+ipcMain.handle('set-title-bar-color', (e, colors) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win) return;
+
+    const systemVersion = typeof app.getSystemVersion === 'function' ? app.getSystemVersion() : '';
+    if (supportsNativeGlass(process.platform, systemVersion)) {
+        try { win.setBackgroundColor('#00000000'); } catch (error) { }
+        return;
+    }
+
+    if (process.platform === 'win32') {
+        try { win.setTitleBarOverlay({ color: colors.bg, symbolColor: colors.symbol }); } catch (error) { }
+    }
+    win.setBackgroundColor(colors.bg);
+});
 ipcMain.handle('check-app-update', async () => { try { const releaseInfo = await fetchLatestGitHubReleaseInfo({ owner: 'EchoHS', repo: 'GeekezBrowser', currentVersion: app.getVersion() }); if (compareVersions(releaseInfo.latestVersion, app.getVersion()) > 0) { return { update: true, remote: releaseInfo.latestVersion, url: 'https://browser.geekez.net/#downloads', notes: releaseInfo.notes }; } return { update: false }; } catch (e) { return { update: false, error: e.message }; } });
 async function checkXrayUpdateAvailable() {
     try {
