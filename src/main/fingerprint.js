@@ -1525,11 +1525,13 @@ function getInjectScript(fp, profileName, watermarkStyle) {
             }
 
             // --- 9. Watermark ---
+            if (window.self !== window.top) return;
             const watermarkStyle = '${style}';
 
             function createWatermark() {
                 try {
                     if (watermarkStyle === 'off') return;
+                    if (window.__geekezWatermarkDismissedForDocument__) return;
                     if (document.getElementById('geekez-watermark')) return;
                     if (!document.body) {
                         setTimeout(createWatermark, 50);
@@ -1539,7 +1541,7 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                     if (watermarkStyle === 'banner') {
                         const banner = document.createElement('div');
                         banner.id = 'geekez-watermark';
-                        banner.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; background: linear-gradient(135deg, rgba(102, 126, 234, 0.5), rgba(118, 75, 162, 0.5)); backdrop-filter: blur(10px); color: white; padding: 5px 20px; text-align: center; font-size: 12px; font-weight: 500; z-index: 2147483647; box-shadow: 0 2px 10px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: center; gap: 8px; font-family: monospace;';
+                        banner.style.cssText = 'position: fixed; bottom: 0; left: 0; right: 0; background: linear-gradient(135deg, rgba(102, 126, 234, 0.5), rgba(118, 75, 162, 0.5)); backdrop-filter: blur(10px); color: white; padding: 5px 20px; text-align: center; font-size: 12px; font-weight: 500; z-index: 2147483647; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: center; gap: 8px; font-family: monospace;';
 
                         const icon = document.createElement('span');
                         icon.textContent = '🔹';
@@ -1550,7 +1552,10 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                         const closeBtn = document.createElement('button');
                         closeBtn.textContent = '×';
                         closeBtn.style.cssText = 'position: absolute; right: 10px; background: rgba(255,255,255,0.2); border: none; color: white; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; font-size: 16px; line-height: 1;';
-                        closeBtn.onclick = function() { banner.style.display = 'none'; };
+                        closeBtn.onclick = function() {
+                            window.__geekezWatermarkDismissedForDocument__ = true;
+                            if (banner.parentNode) banner.parentNode.removeChild(banner);
+                        };
 
                         banner.appendChild(icon);
                         banner.appendChild(text);
@@ -1602,6 +1607,7 @@ function getWatermarkScript(profileName, watermarkStyle) {
         return `
         (function() {
             try {
+                if (window.self !== window.top) return;
                 const watermark = document.getElementById('geekez-watermark');
                 if (watermark && watermark.parentNode) {
                     watermark.parentNode.removeChild(watermark);
@@ -1614,6 +1620,7 @@ function getWatermarkScript(profileName, watermarkStyle) {
     return `
     (function() {
         try {
+            if (window.self !== window.top) return;
             const isGoogleAuthPage = (() => {
                 const isAuthHost = (host) => {
                     const value = String(host || '').toLowerCase();
@@ -1662,6 +1669,7 @@ function getWatermarkScript(profileName, watermarkStyle) {
 
             function createWatermark() {
                 try {
+                    if (window.__geekezWatermarkDismissedForDocument__) return;
                     if (document.getElementById('geekez-watermark')) return;
                     if (!document.body) {
                         setTimeout(createWatermark, 50);
@@ -1673,7 +1681,7 @@ function getWatermarkScript(profileName, watermarkStyle) {
                     if (watermarkStyle === 'banner') {
                         const banner = document.createElement('div');
                         banner.id = 'geekez-watermark';
-                        banner.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; background: linear-gradient(135deg, rgba(102, 126, 234, 0.5), rgba(118, 75, 162, 0.5)); backdrop-filter: blur(10px); color: white; padding: 5px 20px; text-align: center; font-size: 12px; font-weight: 500; z-index: 2147483647; box-shadow: 0 2px 10px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: center; gap: 8px; font-family: monospace;';
+                        banner.style.cssText = 'position: fixed; bottom: 0; left: 0; right: 0; background: linear-gradient(135deg, rgba(102, 126, 234, 0.5), rgba(118, 75, 162, 0.5)); backdrop-filter: blur(10px); color: white; padding: 5px 20px; text-align: center; font-size: 12px; font-weight: 500; z-index: 2147483647; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: center; gap: 8px; font-family: monospace;';
 
                         const icon = document.createElement('span');
                         icon.textContent = '🔹';
@@ -1684,7 +1692,10 @@ function getWatermarkScript(profileName, watermarkStyle) {
                         const closeBtn = document.createElement('button');
                         closeBtn.textContent = '×';
                         closeBtn.style.cssText = 'position: absolute; right: 10px; background: rgba(255,255,255,0.2); border: none; color: white; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; font-size: 16px; line-height: 1;';
-                        closeBtn.onclick = function() { banner.style.display = 'none'; };
+                        closeBtn.onclick = function() {
+                            window.__geekezWatermarkDismissedForDocument__ = true;
+                            if (banner.parentNode) banner.parentNode.removeChild(banner);
+                        };
 
                         banner.appendChild(icon);
                         banner.appendChild(text);
