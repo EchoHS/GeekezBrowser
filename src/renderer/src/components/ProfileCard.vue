@@ -101,12 +101,19 @@ const getTagStyle = (tag) => {
         };
     }
     const hue = stringToHue(tag);
-    const isDarkTheme = uiStore.theme === 'geek' || uiStore.theme === 'dark';
+    if (uiStore.theme === 'geek') {
+        return {
+            backgroundColor: `hsla(${hue}, 44%, 50%, 0.1)`,
+            color: `hsl(${hue}, 54%, 72%)`,
+            border: '1px solid rgba(72, 82, 103, 0.24)'
+        };
+    }
+    const isDarkTheme = uiStore.theme === 'dark';
     if (isDarkTheme) {
         return {
-            backgroundColor: `hsla(${hue}, 68%, 58%, 0.2)`,
-            color: `hsl(${hue}, 82%, 78%)`,
-            border: `1px solid hsla(${hue}, 72%, 66%, 0.32)`
+            backgroundColor: `hsla(${hue}, 38%, 48%, 0.09)`,
+            color: `hsl(${hue}, 48%, 72%)`,
+            border: '1px solid rgba(69, 77, 71, 0.23)'
         };
     }
     return {
