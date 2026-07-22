@@ -108,6 +108,13 @@ const getTagStyle = (tag) => {
             border: '1px solid rgba(72, 82, 103, 0.24)'
         };
     }
+    if (uiStore.theme === 'light') {
+        return {
+            backgroundColor: `hsla(${hue}, 48%, 54%, 0.09)`,
+            color: `hsl(${hue}, 42%, 43%)`,
+            border: '1px solid rgba(87, 98, 112, 0.12)'
+        };
+    }
     const isDarkTheme = uiStore.theme === 'dark';
     if (isDarkTheme) {
         return {

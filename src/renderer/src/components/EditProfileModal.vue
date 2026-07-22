@@ -177,6 +177,9 @@ const AUTO_TIMEZONE_LABEL = 'Auto (IP Based)';
 const LEGACY_AUTO_TIMEZONE_LABEL = 'Auto (No Change)';
 const AUTO_CITY = { name: 'Auto (IP Based)', lat: null, lng: null };
 const AUTO_LANGUAGE_LABEL = 'Auto (IP Based)';
+const NO_OVERRIDE_VALUE = 'none';
+const NO_OVERRIDE_LABEL = 'Do Not Modify (Browser Default)';
+const NO_OVERRIDE_CITY = { name: NO_OVERRIDE_LABEL, lat: null, lng: null, noOverride: true };
 
 const timezoneSearch = ref(AUTO_TIMEZONE_LABEL);
 const showTimezoneList = ref(false);
@@ -186,9 +189,10 @@ const languageSearch = ref(AUTO_LANGUAGE_LABEL);
 const showLanguageList = ref(false);
 
 const allTimezones = window.TIMEZONES || [];
-const allCities = [AUTO_CITY, ...(window.CITY_DATA || [])];
+const allCities = [AUTO_CITY, NO_OVERRIDE_CITY, ...(window.CITY_DATA || [])];
 const allLanguages = window.LANGUAGE_DATA || [
   { name: AUTO_LANGUAGE_LABEL, code: 'auto' },
+  { name: NO_OVERRIDE_LABEL, code: NO_OVERRIDE_VALUE },
   { name: 'English (US)', code: 'en-US' }
 ];
 
@@ -234,21 +238,33 @@ watch(() => uiStore.editModalVisible, async (visible) => {
     
     // Timezone
     form.timezone = fp.timezone || 'Auto';
-    timezoneSearch.value = form.timezone === 'Auto' ? AUTO_TIMEZONE_LABEL : form.timezone;
+    timezoneSearch.value = form.timezone === NO_OVERRIDE_VALUE
+      ? NO_OVERRIDE_LABEL
+      : (form.timezone === 'Auto' ? AUTO_TIMEZONE_LABEL : form.timezone);
 
     // City
     form.city = fp.city || null;
     form.geolocation = fp.geolocation || null;
-    citySearch.value = form.city || 'Auto (IP Based)';
+    citySearch.value = form.city === NO_OVERRIDE_VALUE
+      ? NO_OVERRIDE_LABEL
+      : (form.city || 'Auto (IP Based)');
 
     // Language
     form.language = fp.language || 'auto';
     const langObj = allLanguages.find(l => l.code === form.language);
-    languageSearch.value = form.language === 'auto' ? AUTO_LANGUAGE_LABEL : (langObj ? langObj.name : AUTO_LANGUAGE_LABEL);
+    languageSearch.value = form.language === 'auto'
+      ? AUTO_LANGUAGE_LABEL
+      : (form.language === NO_OVERRIDE_VALUE ? NO_OVERRIDE_LABEL : (langObj ? langObj.name : AUTO_LANGUAGE_LABEL));
   }
 });
 
 function selectTimezone(tz) {
+  if (tz === NO_OVERRIDE_LABEL) {
+    form.timezone = NO_OVERRIDE_VALUE;
+    timezoneSearch.value = NO_OVERRIDE_LABEL;
+    showTimezoneList.value = false;
+    return;
+  }
   const isAuto = tz === AUTO_TIMEZONE_LABEL || tz === LEGACY_AUTO_TIMEZONE_LABEL || tz === 'Auto';
   form.timezone = isAuto ? 'Auto' : tz;
   timezoneSearch.value = isAuto ? AUTO_TIMEZONE_LABEL : tz;
@@ -256,7 +272,11 @@ function selectTimezone(tz) {
 }
 
 function selectCity(city) {
-  if (city.name === 'Auto (IP Based)') {
+  if (city.noOverride || city.name === NO_OVERRIDE_LABEL) {
+    form.city = NO_OVERRIDE_VALUE;
+    form.geolocation = null;
+    citySearch.value = NO_OVERRIDE_LABEL;
+  } else if (city.name === 'Auto (IP Based)') {
     form.city = null;
     form.geolocation = null;
     citySearch.value = 'Auto (IP Based)';
@@ -270,7 +290,9 @@ function selectCity(city) {
 
 function selectLanguage(lang) {
   form.language = lang.code;
-  languageSearch.value = lang.code === 'auto' ? AUTO_LANGUAGE_LABEL : lang.name;
+  languageSearch.value = lang.code === 'auto'
+    ? AUTO_LANGUAGE_LABEL
+    : (lang.code === NO_OVERRIDE_VALUE ? NO_OVERRIDE_LABEL : lang.name);
   showLanguageList.value = false;
 }
 

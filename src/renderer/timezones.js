@@ -1,6 +1,7 @@
 // Comprehensive IANA timezone list for the profile dropdown.
 const TIMEZONES = [
     "Auto (IP Based)",
+    "Do Not Modify (Browser Default)",
     // --- North America ---
     "America/New_York",        // US Eastern
     "America/Chicago",         // US Central

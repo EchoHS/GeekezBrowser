@@ -22,6 +22,14 @@ const gunzip = promisify(zlib.gunzip);
 const initSqlJs = require('sql.js');
 const { SocksClient } = require('socks');
 
+function handleProcessStreamError(error) {
+    if (error?.code === 'EPIPE') return;
+    throw error;
+}
+
+process.stdout?.on?.('error', handleProcessStreamError);
+process.stderr?.on?.('error', handleProcessStreamError);
+
 const uuidv4 = () => crypto.randomUUID();
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -1179,6 +1187,14 @@ function isDirectProxy(proxyStr) {
     return value === 'direct' || value === 'direct://';
 }
 
+function isNoOverrideValue(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === 'none' ||
+        normalized === 'do not modify' ||
+        normalized === 'do not modify (browser default)' ||
+        normalized === 'no change (browser default)';
+}
+
 function isAutoTimezoneValue(value) {
     const normalized = String(value || '').trim().toLowerCase();
     return !normalized ||
@@ -1211,7 +1227,7 @@ function isAutoLanguageValue(value) {
 
 function canonicalizeLocale(value) {
     const raw = String(value || '').trim();
-    if (!raw || isAutoLanguageValue(raw)) return '';
+    if (!raw || isAutoLanguageValue(raw) || isNoOverrideValue(raw)) return '';
     try {
         const locales = Intl.getCanonicalLocales(raw);
         return locales[0] || '';
@@ -1257,7 +1273,8 @@ function buildRuntimeLanguageState(fingerprint = {}) {
             enabled: false,
             language: '',
             languages: [],
-            acceptLanguageHeader: ''
+            acceptLanguageHeader: '',
+            acceptLanguageOverride: ''
         };
     }
 
@@ -1266,7 +1283,9 @@ function buildRuntimeLanguageState(fingerprint = {}) {
         enabled: true,
         language,
         languages,
-        acceptLanguageHeader: buildAcceptLanguageHeader(language, languages)
+        acceptLanguageHeader: buildAcceptLanguageHeader(language, languages),
+        // CDP expects a comma-separated locale list, not an HTTP header with q-values.
+        acceptLanguageOverride: languages.join(',')
     };
 }
 
@@ -1286,6 +1305,7 @@ function getProfileRuntimeLanguageState(profileId) {
         language: '',
         languages: [],
         acceptLanguageHeader: '',
+        acceptLanguageOverride: '',
         updatedAt: 0
     };
 }
@@ -1707,9 +1727,11 @@ function normalizeFingerprintOptions(data = {}) {
     );
 
     const rawLanguage = firstDefined(data.language, inputFp.language);
-    const normalizedLanguage = isAutoLanguageValue(rawLanguage)
-        ? 'auto'
-        : (canonicalizeLocale(rawLanguage) || rawLanguage);
+    const normalizedLanguage = isNoOverrideValue(rawLanguage)
+        ? 'none'
+        : (isAutoLanguageValue(rawLanguage)
+            ? 'auto'
+            : (canonicalizeLocale(rawLanguage) || rawLanguage));
 
     const normalized = {
         ...inputFp,
@@ -1718,7 +1740,9 @@ function normalizeFingerprintOptions(data = {}) {
         city: firstDefined(data.city, inputFp.city),
         geolocation: firstDefined(data.geolocation, inputFp.geolocation),
         language: normalizedLanguage,
-        languages: normalizedLanguage === 'auto' ? [] : firstDefined(data.languages, inputFp.languages),
+        languages: normalizedLanguage === 'auto' || normalizedLanguage === 'none'
+            ? []
+            : firstDefined(data.languages, inputFp.languages),
         platform: firstDefined(data.platform, inputFp.platform),
         hardwareConcurrency: firstDefined(data.hardwareConcurrency, inputFp.hardwareConcurrency),
         deviceMemory: firstDefined(data.deviceMemory, inputFp.deviceMemory),
@@ -5178,7 +5202,11 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         );
         // 0. Resolve language override
         const configuredLang = profile.fingerprint?.language;
-        const hasLanguageOverride = typeof configuredLang === 'string' && configuredLang && !isAutoLanguageValue(configuredLang);
+        const leaveLanguageUnmodified = isNoOverrideValue(configuredLang);
+        const hasLanguageOverride = typeof configuredLang === 'string' &&
+            configuredLang &&
+            !isAutoLanguageValue(configuredLang) &&
+            !leaveLanguageUnmodified;
         const localeFromSystem = (() => {
             try {
                 const rawLocale = app.getLocale ? app.getLocale() : '';
@@ -5198,7 +5226,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             profile.fingerprint.language = targetLang;
             profile.fingerprint.languages = [targetLang, targetLang.split('-')[0]];
         } else {
-            profile.fingerprint.language = 'auto';
+            profile.fingerprint.language = leaveLanguageUnmodified ? 'none' : 'auto';
             profile.fingerprint.languages = [];
         }
 
@@ -5273,7 +5301,8 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         }
         if (hasLanguageOverride) {
             launchArgs.push(`--lang=${targetLang}`);
-            launchArgs.push(`--accept-lang=${targetLang}`);
+            const launchLanguages = normalizeLanguageList(targetLang, profile.fingerprint?.languages);
+            launchArgs.push(`--accept-lang=${launchLanguages.join(',') || targetLang}`);
         }
 
         // 5. Remote Debugging Port (if enabled)
@@ -5331,7 +5360,9 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
 
         // 时区设置
         const env = { ...process.env };
-        if (profile.fingerprint?.timezone && !isAutoTimezoneValue(profile.fingerprint.timezone)) {
+        if (profile.fingerprint?.timezone &&
+            !isAutoTimezoneValue(profile.fingerprint.timezone) &&
+            !isNoOverrideValue(profile.fingerprint.timezone)) {
             env.TZ = profile.fingerprint.timezone;
         }
 
@@ -5501,7 +5532,15 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             if (!session) return;
             const { includeScripts = false, url = '' } = options;
             const runtimeLanguage = getRuntimeLanguageState();
-            const safeMode = isGoogleAuthLikeUrl(url) || isPreNavigationUrl(url);
+            // Apply native locale/timezone overrides while the startup page is still
+            // blank. Deferring them until after navigation creates a detectable
+            // language transition during the first document load.
+            const googleAuthSafeMode = isGoogleAuthLikeUrl(url);
+            const hasTimezoneOverride = !!(
+                runtimeFingerprint?.timezone &&
+                !isAutoTimezoneValue(runtimeFingerprint.timezone) &&
+                !isNoOverrideValue(runtimeFingerprint.timezone)
+            );
 
             if (includeScripts) {
                 try {
@@ -5514,16 +5553,20 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
 
             try { await session.send('Network.enable'); } catch (e) { }
 
-            if (safeMode) {
-                try {
-                    await session.send('Network.setExtraHTTPHeaders', { headers: {} });
-                } catch (e) { }
-                try {
-                    await session.send('Emulation.setLocaleOverride', { locale: '' });
-                } catch (e) { }
-                try {
-                    await session.send('Emulation.setTimezoneOverride', { timezoneId: '' });
-                } catch (e) { }
+            if (googleAuthSafeMode) {
+                if (runtimeLanguage.enabled) {
+                    try {
+                        await session.send('Network.setExtraHTTPHeaders', { headers: {} });
+                    } catch (e) { }
+                    try {
+                        await session.send('Emulation.setLocaleOverride', { locale: '' });
+                    } catch (e) { }
+                }
+                if (hasTimezoneOverride) {
+                    try {
+                        await session.send('Emulation.setTimezoneOverride', { timezoneId: '' });
+                    } catch (e) { }
+                }
             } else if (runtimeLanguage.enabled) {
                 try {
                     await session.send('Network.setExtraHTTPHeaders', {
@@ -5538,7 +5581,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                 } catch (e) { }
             }
 
-            if (runtimeFingerprint?.timezone && !isAutoTimezoneValue(runtimeFingerprint.timezone)) {
+            if (!googleAuthSafeMode && hasTimezoneOverride) {
                 try {
                     await session.send('Emulation.setTimezoneOverride', { timezoneId: runtimeFingerprint.timezone });
                 } catch (e) { }
@@ -5548,8 +5591,8 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                 const payload = {
                     userAgent: profile.fingerprint.userAgent
                 };
-                if (runtimeLanguage.enabled && !safeMode) {
-                    payload.acceptLanguage = runtimeLanguage.acceptLanguageHeader;
+                if (runtimeLanguage.enabled && !googleAuthSafeMode) {
+                    payload.acceptLanguage = runtimeLanguage.acceptLanguageOverride;
                 }
                 if (profile.fingerprint?.platform) {
                     payload.platform = profile.fingerprint.platform;
@@ -5753,7 +5796,10 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         // This changes V8's internal timezone at the engine level - all Date methods
         // (toString, getTimezoneOffset, getHours, etc.) and Intl APIs work correctly.
         const targetTimezone = runtimeFingerprint?.timezone;
-        if (process.platform === 'win32' && targetTimezone && !isAutoTimezoneValue(targetTimezone)) {
+        if (process.platform === 'win32' &&
+            targetTimezone &&
+            !isAutoTimezoneValue(targetTimezone) &&
+            !isNoOverrideValue(targetTimezone)) {
             try {
                 const pages = await browser.pages();
                 for (const page of pages) {

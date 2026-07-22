@@ -610,7 +610,16 @@ function buildUserAgent(browserType, fullVersion, uaPlatformToken) {
     return base;
 }
 
+function isNoLanguageOverrideValue(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === 'none' ||
+        normalized === 'do not modify' ||
+        normalized === 'do not modify (browser default)' ||
+        normalized === 'no change (browser default)';
+}
+
 function normalizeLanguages(language, languages) {
+    if (isNoLanguageOverrideValue(language)) return [];
     if (Array.isArray(languages) && languages.length > 0) {
         return languages.filter(Boolean).map(v => String(v));
     }
@@ -717,8 +726,12 @@ function generateFingerprint(options = {}) {
     };
 
     const screen = resolveScreen(options.screen, options.resW, options.resH);
-    const hasLanguageOverride = typeof options.language === 'string' && options.language && options.language !== 'auto';
-    const language = hasLanguageOverride ? options.language : 'auto';
+    const leaveLanguageUnmodified = isNoLanguageOverrideValue(options.language);
+    const hasLanguageOverride = typeof options.language === 'string' &&
+        options.language &&
+        options.language !== 'auto' &&
+        !leaveLanguageUnmodified;
+    const language = hasLanguageOverride ? options.language : (leaveLanguageUnmodified ? 'none' : 'auto');
     const languages = hasLanguageOverride ? normalizeLanguages(language, options.languages) : [];
 
     const webgl = resolveWebglProfile(runtimePlatform, options.webglProfile || options.webglProfileId, options.webgl);
@@ -893,17 +906,7 @@ function getInjectScript(fp, profileName, watermarkStyle) {
             const enableUaSpoof = fp.uaMode !== 'none';
             const targetUa = (enableUaSpoof && fp.userAgent) ? fp.userAgent : navigator.userAgent;
             const targetMeta = fp.userAgentMetadata || {};
-            const hasLanguageOverride = typeof fp.language === 'string' && fp.language && fp.language !== 'auto';
-            const targetLanguage = hasLanguageOverride ? fp.language : (navigator.language || 'en-US');
-            const targetLanguages = hasLanguageOverride
-                ? (Array.isArray(fp.languages) && fp.languages.length > 0 ? fp.languages : [targetLanguage])
-                : (Array.isArray(navigator.languages) && navigator.languages.length > 0 ? navigator.languages : [targetLanguage]);
             const targetPlatform = fp.platform || navigator.platform;
-
-            if (hasLanguageOverride) {
-                defineValueGetter(Navigator.prototype, 'language', targetLanguage, 'get language');
-                defineValueGetter(Navigator.prototype, 'languages', targetLanguages, 'get languages');
-            }
 
             if (enableUaSpoof) {
                 defineValueGetter(Navigator.prototype, 'userAgent', targetUa, 'get userAgent');
@@ -1003,36 +1006,7 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                 } catch (e) { }
             }
 
-            // --- 5. Intl default language alignment ---
-            if (hasLanguageOverride) {
-                const hookIntlLocaleCtor = (ctorName) => {
-                    try {
-                        const OriginalCtor = Intl[ctorName];
-                        if (typeof OriginalCtor !== 'function') return;
-                        const HookedCtor = function(locales, options) {
-                            return new OriginalCtor(locales || targetLanguage, options);
-                        };
-                        HookedCtor.prototype = OriginalCtor.prototype;
-                        if (typeof OriginalCtor.supportedLocalesOf === 'function') {
-                            HookedCtor.supportedLocalesOf = OriginalCtor.supportedLocalesOf.bind(OriginalCtor);
-                        }
-                        Intl[ctorName] = makeNative(HookedCtor, ctorName);
-                    } catch (e) { }
-                };
-
-                [
-                    'DateTimeFormat',
-                    'NumberFormat',
-                    'Collator',
-                    'DisplayNames',
-                    'ListFormat',
-                    'PluralRules',
-                    'RelativeTimeFormat',
-                    'Segmenter'
-                ].forEach(hookIntlLocaleCtor);
-            }
-
-            // --- 6. Canvas and Audio noise ---
+            // --- 5. Canvas and Audio noise ---
             try {
                 const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
                 const hookedGetImageData = function getImageData(x, y, w, h) {
@@ -1274,9 +1248,6 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                         enableWebglSpoof: enableWebglSpoof,
                         userAgent: targetUa,
                         userAgentMetadata: targetMeta,
-                        languageOverrideEnabled: hasLanguageOverride,
-                        language: targetLanguage,
-                        languages: targetLanguages,
                         platform: targetPlatform,
                         webgl: webglInfo
                     });
@@ -1304,15 +1275,6 @@ function getInjectScript(fp, profileName, watermarkStyle) {
 
                             const nav = self.navigator || {};
                             const navProto = Object.getPrototypeOf(nav);
-                            const hasWorkerLanguageOverride = !!workerPayload.languageOverrideEnabled;
-                            const targetLang = hasWorkerLanguageOverride
-                                ? (workerPayload.language || 'en-US')
-                                : (nav.language || 'en-US');
-                            const targetLangs = hasWorkerLanguageOverride
-                                ? (Array.isArray(workerPayload.languages) && workerPayload.languages.length > 0
-                                    ? workerPayload.languages
-                                    : [targetLang])
-                                : (Array.isArray(nav.languages) && nav.languages.length > 0 ? nav.languages : [targetLang]);
                             const targetPlatform = workerPayload.platform || '';
 
                             const enableWorkerUaSpoof = workerPayload.uaMode !== 'none';
@@ -1321,11 +1283,6 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                                 defineGetter(navProto, 'appVersion', String(workerPayload.userAgent || nav.userAgent || '').replace(/^Mozilla\\//, ''), 'get appVersion');
                                 defineGetter(navProto, 'platform', targetPlatform || nav.platform, 'get platform');
                             }
-                            if (hasWorkerLanguageOverride) {
-                                defineGetter(navProto, 'language', targetLang, 'get language');
-                                defineGetter(navProto, 'languages', targetLangs, 'get languages');
-                            }
-
                             if (enableWorkerUaSpoof) {
                                 const targetMeta = workerPayload.userAgentMetadata || {};
                                 const uaDataSnapshot = {
@@ -1362,24 +1319,6 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                                     }, 'toJSON')
                                 };
                                 defineGetter(navProto, 'userAgentData', uaData, 'get userAgentData');
-                            }
-
-                            if (hasWorkerLanguageOverride) {
-                                ['DateTimeFormat', 'NumberFormat', 'Collator', 'DisplayNames', 'ListFormat', 'PluralRules', 'RelativeTimeFormat', 'Segmenter']
-                                    .forEach((ctorName) => {
-                                        try {
-                                            const OriginalCtor = Intl[ctorName];
-                                            if (typeof OriginalCtor !== 'function') return;
-                                            const HookedCtor = function(locales, options) {
-                                                return new OriginalCtor(locales || targetLang, options);
-                                            };
-                                            HookedCtor.prototype = OriginalCtor.prototype;
-                                            if (typeof OriginalCtor.supportedLocalesOf === 'function') {
-                                                HookedCtor.supportedLocalesOf = OriginalCtor.supportedLocalesOf.bind(OriginalCtor);
-                                            }
-                                            Intl[ctorName] = makeNative(HookedCtor, ctorName);
-                                        } catch (e) { }
-                                    });
                             }
 
                             const enableWorkerWebglSpoof = !!workerPayload.enableWebglSpoof;
