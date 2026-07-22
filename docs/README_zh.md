@@ -139,10 +139,10 @@ npm run build:linux
 
 GeekEZ Browser 是**源码可见软件**，不属于 OSI 认可的开源软件。
 
-- **源代码：**采用 [PolyForm Noncommercial 1.0.0](../LICENSE) 许可。个人及符合协议定义的非商业用途可以免费使用；**任何商业用途均须另行取得书面商业授权**。
-- **Logo、图标及品牌美术资产：**其著作权按照 [CC BY-NC-SA 4.0](../ASSET-LICENSE.md) 许可，仅限符合协议的非商业使用。
-- **商标：**GeekEZ 名称和品牌标识的商标权不由 Creative Commons 协议授予，详见 [TRADEMARKS.md](../TRADEMARKS.md)。
-- **商业授权：**申请方式及适用范围详见 [COMMERCIAL-LICENSE.md](../COMMERCIAL-LICENSE.md)。
+- **源代码：** 采用 [PolyForm Noncommercial 1.0.0](../LICENSE) 许可。个人及符合协议定义的非商业用途可以免费使用；**任何商业用途均须另行取得书面商业授权**。
+- **Logo、图标及品牌美术资产：** 其著作权按照 [CC BY-NC-SA 4.0](../ASSET-LICENSE.md) 许可，仅限符合协议的非商业使用。
+- **商标：** GeekEZ 名称和品牌标识的商标权不由 Creative Commons 协议授予，详见 [TRADEMARKS.md](../TRADEMARKS.md)。
+- **商业授权：** 申请方式及适用范围详见 [COMMERCIAL-LICENSE.md](../COMMERCIAL-LICENSE.md)。
 
 第三方组件继续适用其各自的许可证。
 
