@@ -34,6 +34,30 @@ process.stderr?.on?.('error', handleProcessStreamError);
 
 const uuidv4 = () => crypto.randomUUID();
 
+const PROFILE_SHORTCUT_ARG_PREFIX = '--geekez-profile=';
+const initialProfileShortcutId = getProfileShortcutId(process.argv);
+const pendingProfileShortcutIds = new Set();
+let profileShortcutReady = false;
+let profileShortcutFlushRunning = false;
+let suppressProfileShortcutActivate = Boolean(initialProfileShortcutId);
+
+function getProfileShortcutId(argv = []) {
+    if (!Array.isArray(argv)) return '';
+    const arg = argv.find((value) => typeof value === 'string' && value.startsWith(PROFILE_SHORTCUT_ARG_PREFIX));
+    return arg ? arg.slice(PROFILE_SHORTCUT_ARG_PREFIX.length).trim() : '';
+}
+
+function queueProfileShortcutLaunch(profileId) {
+    const normalized = String(profileId || '').trim();
+    if (!normalized) return;
+    pendingProfileShortcutIds.add(normalized);
+    if (profileShortcutReady) {
+        setImmediate(() => flushProfileShortcutLaunches().catch((error) => {
+            console.error('[Profile Shortcut] Failed to flush launch queue:', error);
+        }));
+    }
+}
+
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
     app.quit();
@@ -81,6 +105,12 @@ import guardBackground from './guard/background.js?raw';
 import guardPasswordContent from './guard/content-passwords.js?raw';
 import guardPopupHtml from './guard/popup.html?raw';
 import guardPopupScript from './guard/popup.js?raw';
+import {
+    prepareMacProfileChromium,
+    removeMacProfileApp,
+    restoreMacProfileLauncher,
+    restoreMacProfileLauncherSync
+} from './macos-profile-app';
 
 const isDev = !app.isPackaged;
 const RESOURCES_BIN = isDev ? path.join(app.getAppPath(), 'resources', 'bin') : path.join(process.resourcesPath, 'bin');
@@ -117,10 +147,12 @@ const PROFILES_FILE = path.join(DATA_PATH, 'profiles.json');
 const SETTINGS_FILE = path.join(DATA_PATH, 'settings.json');
 const DEFAULT_PASSWORDS_FILE = path.join(DATA_PATH, 'default-passwords.json');
 const USER_EXTENSIONS_DIR = path.join(DATA_PATH, '_extensions');
+const MAC_PROFILE_APPS_DIR = path.join(app.getPath('userData'), 'ProfileApps');
 
 fs.ensureDirSync(DATA_PATH);
 fs.ensureDirSync(TRASH_PATH);
 fs.ensureDirSync(USER_EXTENSIONS_DIR);
+if (process.platform === 'darwin') fs.ensureDirSync(MAC_PROFILE_APPS_DIR);
 
 const EXTENSION_STORE_CATALOG = [
     {
@@ -484,6 +516,26 @@ function createInternalApiServer() {
         if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
 
         const url = new URL(req.url, `http://localhost:${INTERNAL_API_PORT}`);
+
+        if (req.method === 'POST' && url.pathname === '/api/profile-shortcut') {
+            if (req.headers['x-geekez-profile-shortcut'] !== '1') {
+                res.writeHead(403);
+                return res.end(JSON.stringify({ success: false, error: 'Forbidden' }));
+            }
+            const profileId = String(url.searchParams.get('profileId') || '').trim();
+            if (!profileId || !/^[a-zA-Z0-9_-]+$/.test(profileId)) {
+                res.writeHead(400);
+                return res.end(JSON.stringify({ success: false, error: 'valid profileId required' }));
+            }
+            const profiles = await readAllProfilesSafe();
+            if (!profiles.some(profile => profile.id === profileId)) {
+                res.writeHead(404);
+                return res.end(JSON.stringify({ success: false, error: 'Profile not found' }));
+            }
+            queueProfileShortcutLaunch(profileId);
+            res.writeHead(202);
+            return res.end(JSON.stringify({ success: true, profileId }));
+        }
 
         if (req.method === 'GET' && url.pathname === '/api/runtime/language') {
             const profileId = String(url.searchParams.get('profileId') || '').trim();
@@ -3176,7 +3228,12 @@ async function ensureBrowserWindowVisible(page, { nudge = false } = {}) {
     }
 }
 
-app.on('second-instance', () => {
+app.on('second-instance', (event, commandLine) => {
+    const profileId = getProfileShortcutId(commandLine);
+    if (profileId) {
+        queueProfileShortcutLaunch(profileId);
+        return;
+    }
     showMainWindow();
 });
 
@@ -3214,6 +3271,11 @@ async function stopRunningProfile(profileId, options = {}) {
     try { await proc.browser.close(); } catch (e) { }
     if (proc.logFd !== undefined) {
         try { fs.closeSync(proc.logFd); } catch (e) { }
+    }
+    if (proc.macProfileApp) {
+        await restoreMacProfileLauncher(proc.macProfileApp).catch((error) => {
+            console.warn(`[macOS Dock] Failed to restore launcher for ${profileId}:`, error.message);
+        });
     }
 
     delete activeProcesses[profileId];
@@ -3534,12 +3596,14 @@ async function createTray() {
     return appTray;
 }
 
-function createWindow() {
+function createWindow(options = {}) {
+    const { show = true } = options;
     const { width, height } = screen.getPrimaryDisplay().workAreaSize;
     const systemVersion = typeof app.getSystemVersion === 'function' ? app.getSystemVersion() : '';
     const materialOptions = getMainWindowMaterialOptions(process.platform, systemVersion);
     const win = new BrowserWindow({
         width: Math.round(width * 0.5), height: Math.round(height * 0.601), minWidth: 900, minHeight: 600,
+        show,
         title: "GeekEZ Browser",
         icon: resolveWindowIconPath(),
         ...(process.platform !== 'darwin'
@@ -3693,7 +3757,11 @@ app.whenReady().then(async () => {
     });
     cachedCloseBehavior = normalizeCloseBehavior(readSettingsSync().closeBehavior);
     initializeProxyRecoveryMonitor();
-    createWindow();
+    createWindow({ show: !initialProfileShortcutId });
+    if (initialProfileShortcutId && process.platform === 'darwin' && app.dock && typeof app.dock.hide === 'function') {
+        const hideRet = app.dock.hide();
+        if (hideRet && typeof hideRet.catch === 'function') hideRet.catch(() => { });
+    }
     await createTray().catch((err) => {
         console.error('Failed to initialize tray:', err);
     });
@@ -3731,10 +3799,16 @@ app.whenReady().then(async () => {
         console.error('Failed to auto-start Public API server:', e);
     }
 
+    profileShortcutReady = true;
+    if (initialProfileShortcutId) pendingProfileShortcutIds.add(initialProfileShortcutId);
+    await flushProfileShortcutLaunches();
+    suppressProfileShortcutActivate = false;
+
     setTimeout(() => { fs.emptyDir(TRASH_PATH).catch(() => { }); }, 10000);
 });
 
 app.on('activate', () => {
+    if (suppressProfileShortcutActivate) return;
     showMainWindow();
 });
 
@@ -4560,6 +4634,14 @@ ipcMain.handle('delete-profile', (event, id) => runProfileApiTask(async () => {
             console.log(`Moved to trash: ${trashDest}`);
         } catch (err) {
             console.error(`Failed to move to trash:`, err);
+        }
+    }
+
+    if (process.platform === 'darwin') {
+        try {
+            await removeMacProfileApp({ profileId: id, rootDir: MAC_PROFILE_APPS_DIR });
+        } catch (err) {
+            console.warn(`Failed to remove macOS Dock app for profile ${id}:`, err.message);
         }
     }
 
@@ -5594,6 +5676,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
     let xrayProcess = null;
     let logFd;
     let browser = null;
+    let macProfileApp = null;
     try {
         const profileDir = path.join(DATA_PATH, profileId);
         const userDataDir = path.join(profileDir, 'browser_data');
@@ -5966,12 +6049,34 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             { step: 8, profileName: progressProfileName }
         );
         // 5. 启动浏览器
-        const chromePath = getChromiumPath();
-        if (!chromePath) {
+        const sourceChromePath = getChromiumPath();
+        if (!sourceChromePath) {
             if (xrayProcess && xrayProcess.pid) {
                 await forceKill(xrayProcess.pid);
             }
             throw new Error("Chrome binary not found.");
+        }
+
+        let chromePath = sourceChromePath;
+        if (process.platform === 'darwin') {
+            try {
+                const preparedProfileApp = await prepareMacProfileChromium({
+                    sourceExecutable: sourceChromePath,
+                    profileId,
+                    profileName: profile.name,
+                    rootDir: MAC_PROFILE_APPS_DIR
+                });
+                macProfileApp = preparedProfileApp;
+                chromePath = preparedProfileApp.executablePath;
+                console.log(
+                    `[macOS Dock] ${profile.name || profileId}: ${preparedProfileApp.bundleId} -> ${preparedProfileApp.appPath}`
+                );
+            } catch (dockAppError) {
+                console.warn(
+                    `[macOS Dock] Failed to prepare stable app identity for ${profile.name || profileId}; using bundled Chromium:`,
+                    dockAppError?.message || dockAppError
+                );
+            }
         }
 
         // GeekEZ Guard owns credential capture and autofill. Disable only the
@@ -6235,6 +6340,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             xrayConfigPath,
             localPort,
             browser,
+            macProfileApp,
             logFd,
             recoveringProxy: false,
             stopping: false
@@ -6310,6 +6416,11 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                 if (!sender.isDestroyed()) sender.send('profile-status', { id: profileId, status: 'stopped' });
                 refreshTrayMenu().catch(() => { });
             }
+            if (macProfileApp) {
+                await restoreMacProfileLauncher(macProfileApp).catch((error) => {
+                    console.warn(`[macOS Dock] Failed to restore launcher for ${profile.name || profileId}:`, error.message);
+                });
+            }
         });
 
         return switchMsg;
@@ -6331,6 +6442,11 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         launchingProfiles.delete(profileId);
         delete activeProcesses[profileId];
         clearProfileRuntimeLanguageState(profileId);
+        if (macProfileApp) {
+            await restoreMacProfileLauncher(macProfileApp).catch((error) => {
+                console.warn(`[macOS Dock] Failed to restore launcher after launch error for ${profile.name || profileId}:`, error.message);
+            });
+        }
         if (!sender.isDestroyed()) {
             sender.send('profile-status', { id: profileId, status: 'stopped' });
         }
@@ -6343,10 +6459,61 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
 };
 ipcMain.handle('launch-profile', launchProfileHandler);
 
+async function launchProfileFromShortcut(profileId) {
+    const profiles = await readAllProfilesSafe();
+    const profile = profiles.find((item) => item.id === profileId);
+    if (!profile) {
+        console.warn(`[Profile Shortcut] Profile not found: ${profileId}`);
+        showMainWindow();
+        return;
+    }
+
+    const settings = readSettingsSync();
+    const preferredLang = settings.lang === 'en' ? 'en' : 'cn';
+    const watermarkStyle = settings.watermarkStyle === 'banner' || settings.watermarkStyle === 'off'
+        ? settings.watermarkStyle
+        : 'enhanced';
+
+    console.log(`[Profile Shortcut] Launching ${profile.name || profileId} (${profileId})`);
+    await launchProfileHandler(
+        getProfileLaunchEventSender(),
+        profileId,
+        watermarkStyle,
+        preferredLang
+    );
+}
+
+async function flushProfileShortcutLaunches() {
+    if (!profileShortcutReady || profileShortcutFlushRunning) return;
+    profileShortcutFlushRunning = true;
+    try {
+        while (pendingProfileShortcutIds.size > 0) {
+            const [profileId] = pendingProfileShortcutIds;
+            pendingProfileShortcutIds.delete(profileId);
+            try {
+                await launchProfileFromShortcut(profileId);
+            } catch (error) {
+                console.error(`[Profile Shortcut] Failed to launch ${profileId}:`, error);
+                showMainWindow();
+            }
+        }
+    } finally {
+        profileShortcutFlushRunning = false;
+        if (profileShortcutReady && pendingProfileShortcutIds.size > 0) {
+            setImmediate(() => flushProfileShortcutLaunches().catch((error) => {
+                console.error('[Profile Shortcut] Failed to resume launch queue:', error);
+            }));
+        }
+    }
+}
+
 app.on('before-quit', () => {
     isAppQuitting = true;
     Object.values(activeProcesses).forEach((proc) => {
         proc.stopping = true;
+        if (proc.macProfileApp) {
+            try { restoreMacProfileLauncherSync(proc.macProfileApp); } catch (e) { }
+        }
     });
 });
 
