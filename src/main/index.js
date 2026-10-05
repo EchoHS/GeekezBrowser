@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, screen, shell, Tray, Menu, nativeImage, powerMonitor, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, shell, Tray, Menu, nativeImage, powerMonitor, safeStorage, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
 const { spawn, exec, execSync } = require('child_process');
@@ -19,6 +19,15 @@ const xrayRelease = require('./xray-assets');
 const { supportsNativeGlass, getMainWindowMaterialOptions } = require('./native-glass');
 const { allocateLocalProxyPort, isXrayLocalBindFailure } = require('./local-proxy-port');
 const { createProfileSync } = require('./profile-sync');
+const {
+    authorizeLocalRequest,
+    createApiToken,
+    getRequestOrigin,
+    isAllowedInternalPreflight,
+    sendForbidden,
+    setInternalCorsHeaders,
+    setJsonSecurityHeaders
+} = require('./local-api-security');
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
 const initSqlJs = require('sql.js');
@@ -182,6 +191,8 @@ function runProfileApiTask(task) {
 const runtimeProfileLanguageStates = new Map();
 let apiServer = null;
 let apiServerRunning = false;
+const publicApiToken = createApiToken();
+const internalApiToken = createApiToken();
 let mainWindow = null; // Global reference for API-to-UI communication
 let appTray = null;
 let isAppQuitting = false;
@@ -192,17 +203,13 @@ let cachedCloseBehavior = CLOSE_BEHAVIOR.TRAY;
 // ============================================================================
 function createApiServer(port) {
     const server = http.createServer(async (req, res) => {
-        // CORS headers
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-        res.setHeader('Content-Type', 'application/json');
+        setJsonSecurityHeaders(res);
 
-        if (req.method === 'OPTIONS') {
-            res.writeHead(200);
-            res.end();
-            return;
-        }
+        // This API is for explicitly configured local clients, not browser pages.
+        // Requiring a per-process token and rejecting every browser Origin prevents
+        // websites from reading or mutating local profile state through localhost.
+        const authorization = authorizeLocalRequest(req, publicApiToken);
+        if (!authorization.ok) return sendForbidden(res);
 
         const url = new URL(req.url, `http://localhost:${port}`);
         const pathname = url.pathname;
@@ -454,9 +461,9 @@ async function streamApiOpenProfile({ req, res, params, settings, profile, resol
     return { __streamHandled: true };
 }
 
-// 2. 扩展密码同步与 2FA 的内部服务器 (独立端口 12139，无条件常驻)
+// 2. 扩展密码同步与 2FA 的内部服务器（随机端口 + 每次启动随机令牌）
 let internalApiServer = null;
-const INTERNAL_API_PORT = 12139;
+let internalApiPort = null;
 
 function normalizeTotpSecret(value) {
     const invalidSecret = () => Object.assign(new Error('请输入有效的 Base32 密钥（至少 16 个字符）'), { statusCode: 400 });
@@ -476,14 +483,21 @@ function normalizeTotpSecret(value) {
 
 function createInternalApiServer() {
     const server = http.createServer(async (req, res) => {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-        res.setHeader('Content-Type', 'application/json');
+        setJsonSecurityHeaders(res);
+        const origin = getRequestOrigin(req);
 
-        if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+        if (req.method === 'OPTIONS') {
+            if (!isAllowedInternalPreflight(req)) return sendForbidden(res);
+            setInternalCorsHeaders(res, origin);
+            res.writeHead(204);
+            return res.end();
+        }
 
-        const url = new URL(req.url, `http://localhost:${INTERNAL_API_PORT}`);
+        const authorization = authorizeLocalRequest(req, internalApiToken, { allowChromeExtension: true });
+        if (!authorization.ok) return sendForbidden(res);
+        setInternalCorsHeaders(res, authorization.origin);
+
+        const url = new URL(req.url, 'http://127.0.0.1');
 
         if (req.method === 'GET' && url.pathname === '/api/runtime/language') {
             const profileId = String(url.searchParams.get('profileId') || '').trim();
@@ -2403,69 +2417,6 @@ async function buildProfileFromInput(rawData, profiles, settings, existingProfil
     };
 }
 
-function cleanExportProfile(profile) {
-    return {
-        ...profile,
-        fingerprint: cleanFingerprint(profile.fingerprint)
-    };
-}
-
-function readExportSelectorValues(params, key) {
-    return params.getAll(key)
-        .flatMap(value => String(value || '').split(','))
-        .map(value => value.trim())
-        .filter(Boolean);
-}
-
-function resolveApiExportProfiles(profiles, params, routeSelector = '') {
-    const selectors = [
-        routeSelector ? decodeURIComponent(routeSelector) : '',
-        ...readExportSelectorValues(params, 'id'),
-        ...readExportSelectorValues(params, 'ids'),
-        ...readExportSelectorValues(params, 'profileId'),
-        ...readExportSelectorValues(params, 'profileIds'),
-        ...readExportSelectorValues(params, 'name'),
-        ...readExportSelectorValues(params, 'names'),
-        ...readExportSelectorValues(params, 'profile'),
-        ...readExportSelectorValues(params, 'profiles')
-    ].map(value => String(value || '').trim()).filter(Boolean);
-
-    if (selectors.length === 0) {
-        return { profiles, selectedAll: true };
-    }
-
-    const selected = [];
-    const selectedIds = new Set();
-    const missing = [];
-
-    for (const selector of selectors) {
-        const profile = profiles.find(item => item.id === selector || item.name === selector);
-        if (!profile) {
-            missing.push(selector);
-            continue;
-        }
-        if (!selectedIds.has(profile.id)) {
-            selectedIds.add(profile.id);
-            selected.push(profile);
-        }
-    }
-
-    if (missing.length > 0) {
-        return {
-            error: {
-                status: 404,
-                data: {
-                    success: false,
-                    error: 'Profile not found',
-                    missing
-                }
-            }
-        };
-    }
-
-    return { profiles: selected, selectedAll: false };
-}
-
 function profileResourceError(message, status = 400) {
     return Object.assign(new Error(message), { status });
 }
@@ -2768,111 +2719,6 @@ async function handleApiRequest(method, pathname, body, params, context = {}) {
         if (!stopped) return { status: 404, data: { success: false, error: 'Profile not running' } };
         return { success: true, message: 'Profile stopped' };
     }
-
-
-
-    // GET /api/export/all?password=xxx - Export full backup (v2)
-    // GET /api/export/profile/:idOrName?password=xxx - Export one profile backup
-    const exportFullMatch = pathname.match(/^\/api\/export\/(all|profile)(?:\/([^\/]+))?$/);
-    if (method === 'GET' && exportFullMatch) {
-        const exportKind = exportFullMatch[1];
-        const selection = resolveApiExportProfiles(profiles, params, exportFullMatch[2] || '');
-        if (selection.error) return selection.error;
-        if (exportKind === 'profile' && selection.selectedAll) {
-            return { status: 400, data: { success: false, error: 'Profile id or name required' } };
-        }
-        const password = params.get('password');
-        if (!password) return { status: 400, data: { success: false, error: 'Password required. Use ?password=yourpassword' } };
-        const selectedProfiles = selection.profiles;
-
-        const backupData = {
-            version: 2,
-            createdAt: Date.now(),
-            profiles: selectedProfiles.map(cleanExportProfile),
-            preProxies: settings.preProxies || [],
-            subscriptions: settings.subscriptions || [],
-            browserData: {}
-        };
-
-        // 1. 文件拷贝
-        const filesToBackup = [
-            'Bookmarks', 'Bookmarks.bak', 'History', 'History-journal',
-            'Favicons', 'Favicons-journal', 'Preferences', 'Secure Preferences',
-            'Top Sites', 'Top Sites-journal', 'Web Data', 'Web Data-journal'
-        ];
-        const chromePath = getChromiumPath();
-        for (const profile of selectedProfiles) {
-            const profileDataDir = path.join(DATA_PATH, profile.id, 'browser_data');
-            const defaultDir = path.join(profileDataDir, 'Default');
-            if (!fs.existsSync(defaultDir)) continue;
-            const browserFiles = {};
-            for (const f of filesToBackup) {
-                const fp = path.join(defaultDir, f);
-                if (fs.existsSync(fp)) {
-                    try { browserFiles[f] = (await fs.readFile(fp)).toString('base64'); } catch (e) { }
-                }
-            }
-            if (Object.keys(browserFiles).length > 0) backupData.browserData[profile.id] = browserFiles;
-
-            // 2. CDP Cookie + 密码解密
-            if (!backupData.browserData[profile.id]) backupData.browserData[profile.id] = {};
-            try {
-                const browser = await puppeteer.launch({
-                    headless: 'new', executablePath: chromePath, userDataDir: profileDataDir,
-                    args: ['--no-first-run', '--disable-extensions', '--disable-sync', '--disable-gpu'],
-                    defaultViewport: null, ignoreDefaultArgs: ['--enable-automation'],
-                });
-                const page = (await browser.pages())[0] || await browser.newPage();
-                const client = await page.createCDPSession();
-                const { cookies } = await client.send('Network.getAllCookies');
-                await browser.close();
-                backupData.browserData[profile.id]._cookies = cookies;
-            } catch (err) { }
-            try {
-                const pwJsonFile = path.join(DATA_PATH, profile.id, 'passwords.json');
-                const passwords = await readEncryptedPasswords(pwJsonFile, profile.id);
-                if (passwords.length > 0) backupData.browserData[profile.id]._passwords = passwords;
-            } catch (err) { }
-        }
-
-        const jsonStr = JSON.stringify(backupData);
-        const compressed = await gzip(Buffer.from(jsonStr, 'utf8'));
-        const encrypted = encryptData(compressed, password);
-
-        return {
-            success: true,
-            data: encrypted.toString('base64'),
-            filename: selection.selectedAll
-                ? `GeekEZ_FullBackup_${Date.now()}.geekez`
-                : `GeekEZ_FullBackup_Selected_${Date.now()}.geekez`,
-            profileCount: selectedProfiles.length
-        };
-    }
-
-    // GET /api/export/fingerprint - Export YAML fingerprints
-    const exportFingerprintMatch = pathname.match(/^\/api\/export\/fingerprint(?:\/([^\/]+))?$/);
-    if (method === 'GET' && exportFingerprintMatch) {
-        const selection = resolveApiExportProfiles(profiles, params, exportFingerprintMatch[1] || '');
-        if (selection.error) return selection.error;
-        const selectedProfiles = selection.profiles;
-        const exportData = selectedProfiles.map(p => ({
-            id: p.id,
-            name: p.name,
-            proxyStr: p.proxyStr,
-            tags: p.tags,
-            fingerprint: cleanFingerprint(p.fingerprint)
-        }));
-        const yamlStr = yaml.dump(exportData, { lineWidth: -1, noRefs: true });
-        return {
-            success: true,
-            data: yamlStr,
-            filename: selection.selectedAll
-                ? `GeekEZ_Profiles_${Date.now()}.yaml`
-                : `GeekEZ_Profiles_Selected_${Date.now()}.yaml`,
-            profileCount: selectedProfiles.length
-        };
-    }
-
     // POST /api/import - Import backup (YAML or encrypted)
     if (method === 'POST' && pathname === '/api/import') {
         try {
@@ -2969,7 +2815,12 @@ ipcMain.handle('stop-api-server', async () => {
 });
 
 ipcMain.handle('get-api-status', () => {
-    return { running: apiServerRunning };
+    return { running: apiServerRunning, authenticationRequired: true };
+});
+
+ipcMain.handle('copy-api-token', () => {
+    clipboard.writeText(publicApiToken);
+    return { success: true };
 });
 
 
@@ -3614,10 +3465,12 @@ async function generateExtension(profilePath, fingerprint, profileName, watermar
     const syncStateFile = path.join(DATA_PATH, profileId, 'passwords-sync-state.json');
     const syncState = fs.existsSync(syncStateFile) ? await fs.readJson(syncStateFile) : null;
 
-    // 内部扩展固定使用独立端口 12139
-    const apiPort = INTERNAL_API_PORT;
+    if (!Number.isInteger(internalApiPort) || internalApiPort <= 0) {
+        throw new Error('GeekEZ Guard internal service is not ready');
+    }
+    const apiPort = internalApiPort;
     const backgroundConfig = `const PROFILE_ID = ${JSON.stringify(profileId || '')};\n` +
-        `const API_PORT = ${apiPort};\nconst INIT_PASSWORDS = ${JSON.stringify(passwords)};\n` +
+        `const API_PORT = ${apiPort};\nconst API_TOKEN = ${JSON.stringify(internalApiToken)};\nconst INIT_PASSWORDS = ${JSON.stringify(passwords)};\n` +
         `const INIT_PASSWORDS_REVISION = ${JSON.stringify(syncState?.revision || '')};\n`;
     const backgroundScript = backgroundConfig + guardBackground;
     const backgroundHash = crypto.createHash('sha256').update(backgroundScript).digest('hex').slice(0, 16);
@@ -3693,16 +3546,18 @@ app.whenReady().then(async () => {
     });
     cachedCloseBehavior = normalizeCloseBehavior(readSettingsSync().closeBehavior);
     initializeProxyRecoveryMonitor();
-    createWindow();
-    await createTray().catch((err) => {
-        console.error('Failed to initialize tray:', err);
-    });
 
-    // Auto-start internal API server explicitly for GeekEZ Guard
+    // Auto-start the authenticated internal API on an ephemeral loopback port.
     try {
         internalApiServer = createInternalApiServer();
-        internalApiServer.listen(INTERNAL_API_PORT, '127.0.0.1', () => {
-            console.log(`🛡️ Internal Guard Server auto-started on http://localhost:${INTERNAL_API_PORT}`);
+        await new Promise((resolve, reject) => {
+            internalApiServer.once('error', reject);
+            internalApiServer.listen(0, '127.0.0.1', () => {
+                internalApiServer.off('error', reject);
+                internalApiPort = internalApiServer.address().port;
+                console.log('🛡️ Internal Guard Server started on an ephemeral loopback port');
+                resolve();
+            });
         });
         internalApiServer.on('error', (err) => {
             console.error('Internal Guard Server failed to start:', err);
@@ -3710,6 +3565,11 @@ app.whenReady().then(async () => {
     } catch (e) {
         console.error('Failed to auto-start Internal Guard Server:', e);
     }
+
+    createWindow();
+    await createTray().catch((err) => {
+        console.error('Failed to initialize tray:', err);
+    });
 
     // Auto-start public API server if enabled
     try {

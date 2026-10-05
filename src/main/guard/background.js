@@ -1,4 +1,4 @@
-/* PROFILE_ID, API_PORT and INIT_PASSWORDS are injected when the extension is generated. */
+/* PROFILE_ID, API_PORT, API_TOKEN and INIT_PASSWORDS are injected when the extension is generated. */
 let passwordQueue = Promise.resolve();
 const totpCache = new Map();
 const totpRequests = new Map();
@@ -73,7 +73,10 @@ async function getPasswords() {
 async function postApi(endpoint, payload) {
     const response = await fetch('http://127.0.0.1:' + API_PORT + endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Authorization': 'Bearer ' + API_TOKEN,
+            'Content-Type': 'application/json'
+        },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(5000)
     });

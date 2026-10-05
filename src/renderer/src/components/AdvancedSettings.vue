@@ -46,9 +46,11 @@
                     <input id="advanced-port" v-model.number="port" type="number" min="1024" max="65535">
                     <button class="outline settings-icon-button" :title="$t('save')" :aria-label="$t('save')" :disabled="changing || settings.apiStarting" @click="savePort"><Check :size="16" /></button>
                     <button class="outline settings-icon-button" :title="$t('advancedApiDocs')" :aria-label="$t('advancedApiDocs')" @click="ipcService.openUrl('https://browser.geekez.net/doc.html#doc-api')"><BookOpen :size="16" /></button>
+                    <button class="outline" :disabled="changing || settings.apiStarting" @click="copyApiToken"><Copy :size="15" />{{ $t('apiCopyToken') }}</button>
                     <code>http://localhost:{{ settings.apiPort }}</code>
                 </div>
                 <p v-if="settings.apiStarting" class="setting-message" role="status">{{ $t('apiStarting') }}</p>
+                <p v-if="notice" class="setting-message" role="status">{{ notice }}</p>
             </div>
         </details>
 
@@ -75,7 +77,7 @@
 
 <script setup>
 import { ref, watch } from 'vue';
-import { SlidersHorizontal, Cable, Check, BookOpen, FolderOpen, RotateCcw, ChevronDown } from '@lucide/vue';
+import { SlidersHorizontal, Cable, Check, BookOpen, Copy, FolderOpen, RotateCcw, ChevronDown } from '@lucide/vue';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useUIStore } from '../store/useUIStore';
 import { settingService } from '../services/setting.service';
@@ -87,6 +89,7 @@ const ui = useUIStore();
 const port = ref(settings.apiPort);
 const changing = ref(false);
 const error = ref('');
+const notice = ref('');
 const restartRequired = ref(false);
 const switches = [
     { field: 'enableUaWebglModify', method: 'toggleUaWebglModify', label: 'advancedUa' },
@@ -98,6 +101,7 @@ watch(() => settings.apiPort, value => { port.value = value; });
 async function update(method, value) {
     changing.value = true;
     error.value = '';
+    notice.value = '';
     try { await settings[method](value); }
     catch (caught) { error.value = caught.message; await settings.loadSettings(); }
     finally { changing.value = false; }
@@ -105,6 +109,17 @@ async function update(method, value) {
 async function savePort() {
     if (!Number.isInteger(port.value) || port.value < 1024 || port.value > 65535) { error.value = window.t('apiPortInvalid'); return; }
     await update('saveApiPort', port.value);
+}
+async function copyApiToken() {
+    error.value = '';
+    notice.value = '';
+    try {
+        const result = await settingService.copyApiToken();
+        if (!result?.success) throw new Error(result?.error || window.t('apiTokenCopyFailed'));
+        notice.value = window.t('apiTokenCopied');
+    } catch (caught) {
+        error.value = caught.message;
+    }
 }
 async function selectDirectory() {
     const directory = await settingService.selectDataDirectory();
