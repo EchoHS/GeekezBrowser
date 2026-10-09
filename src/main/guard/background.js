@@ -1,5 +1,5 @@
-/* PROFILE_ID, API_PORT and INIT_PASSWORDS are injected when the extension is generated. */
 let passwordQueue = Promise.resolve();
+let configPromise;
 const totpCache = new Map();
 const totpRequests = new Map();
 const LOGIN_TTL = 10 * 60 * 1000;
@@ -16,9 +16,30 @@ const SYNC_KEY = 'geekez_passwords_sync_pending';
 const API_REVISIONS_KEY = 'geekez_passwords_api_revisions';
 const SNAPSHOT_REVISION_KEY = 'geekez_passwords_snapshot_revision';
 
+function getGuardConfig() {
+    if (!configPromise) {
+        configPromise = (async () => {
+            const response = await fetch(chrome.runtime.getURL('guard-config.json'), { cache: 'no-store' });
+            if (!response.ok) throw new Error('无法读取密码管理器配置');
+            const config = await response.json();
+            if (typeof config.profileId !== 'string' || !config.profileId ||
+                !Number.isInteger(config.apiPort) || config.apiPort < 1 || config.apiPort > 65535 ||
+                !Array.isArray(config.passwords) || typeof config.snapshotRevision !== 'string') {
+                throw new Error('密码管理器配置无效');
+            }
+            return config;
+        })().catch(error => {
+            configPromise = undefined;
+            throw error;
+        });
+    }
+    return configPromise;
+}
+
 async function getPasswords() {
+    const config = await getGuardConfig();
     const stored = await chrome.storage.local.get([PASSWORDS_KEY, LEGACY_PASSWORDS_KEY, API_REVISIONS_KEY, SNAPSHOT_REVISION_KEY]);
-    const snapshotRevision = typeof INIT_PASSWORDS_REVISION === 'string' ? INIT_PASSWORDS_REVISION : '';
+    const snapshotRevision = config.snapshotRevision;
     const replaceSnapshot = snapshotRevision && stored[SNAPSHOT_REVISION_KEY] !== snapshotRevision;
     // Migrate the uppercase key if the canonical store has not been created yet.
     const storedPasswords = Array.isArray(stored[PASSWORDS_KEY])
@@ -26,7 +47,7 @@ async function getPasswords() {
         : stored[LEGACY_PASSWORDS_KEY];
     // An empty list is intentional. Only a missing store is initialized from disk.
     let changed = replaceSnapshot || !Array.isArray(stored[PASSWORDS_KEY]);
-    const passwords = replaceSnapshot || !Array.isArray(storedPasswords) ? structuredClone(INIT_PASSWORDS) : storedPasswords;
+    const passwords = replaceSnapshot || !Array.isArray(storedPasswords) ? structuredClone(config.passwords) : storedPasswords;
     const ids = new Set();
     for (const entry of passwords) {
         if (typeof entry.id !== 'string' || !entry.id || ids.has(entry.id)) {
@@ -44,7 +65,7 @@ async function getPasswords() {
     const revisions = replaceSnapshot ? {} : { ...stored[API_REVISIONS_KEY] };
     const apiFields = new Set(['url', 'origin', 'username', 'password', 'name', 'notes', 'twoFactorEnabled', 'twoFactorSecret']);
     // Import explicit API changes once, including into an intentionally empty vault.
-    for (const seeded of INIT_PASSWORDS) {
+    for (const seeded of config.passwords) {
         const update = seeded.apiUpdate;
         if (!update?.revision || revisions[seeded.id] === update.revision) continue;
         const incoming = { ...seeded };
@@ -71,7 +92,8 @@ async function getPasswords() {
 }
 
 async function postApi(endpoint, payload) {
-    const response = await fetch('http://127.0.0.1:' + API_PORT + endpoint, {
+    const config = await getGuardConfig();
+    const response = await fetch('http://127.0.0.1:' + config.apiPort + endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -84,8 +106,9 @@ async function postApi(endpoint, payload) {
 
 async function syncToElectron(passwords) {
     try {
+        const config = await getGuardConfig();
         const state = await chrome.storage.local.get([API_REVISIONS_KEY, SNAPSHOT_REVISION_KEY]);
-        await postApi('/api/passwords/sync', { profileId: PROFILE_ID, passwords, apiRevisions: state[API_REVISIONS_KEY] || {}, snapshotRevision: state[SNAPSHOT_REVISION_KEY] || '' });
+        await postApi('/api/passwords/sync', { profileId: config.profileId, passwords, apiRevisions: state[API_REVISIONS_KEY] || {}, snapshotRevision: state[SNAPSHOT_REVISION_KEY] || '' });
         await chrome.storage.local.set({ [SYNC_KEY]: false });
     } catch (error) {
         throw new Error('扩展内的修改已保存，但加密文件同步失败：' + error.message);

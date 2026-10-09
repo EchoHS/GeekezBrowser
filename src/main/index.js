@@ -3616,17 +3616,18 @@ async function generateExtension(profilePath, fingerprint, profileName, watermar
 
     // 内部扩展固定使用独立端口 12139
     const apiPort = INTERNAL_API_PORT;
-    const backgroundConfig = `const PROFILE_ID = ${JSON.stringify(profileId || '')};\n` +
-        `const API_PORT = ${apiPort};\nconst INIT_PASSWORDS = ${JSON.stringify(passwords)};\n` +
-        `const INIT_PASSWORDS_REVISION = ${JSON.stringify(syncState?.revision || '')};\n`;
-    const backgroundScript = backgroundConfig + guardBackground;
-    const backgroundHash = crypto.createHash('sha256').update(backgroundScript).digest('hex').slice(0, 16);
-    const backgroundFile = `background-${backgroundHash}.js`;
+    const backgroundConfig = {
+        profileId: profileId || '',
+        apiPort,
+        passwords,
+        snapshotRevision: syncState?.revision || ''
+    };
+    const backgroundFile = 'background.js';
 
     const manifest = {
         manifest_version: 3,
         name: "GeekEZ Guard",
-        version: "1.2.3",
+        version: "1.2.4",
         description: "Privacy & Password Protection",
         permissions: ["storage", "activeTab"],
         host_permissions: ["http://127.0.0.1/*", "http://localhost/*"],
@@ -3657,8 +3658,8 @@ async function generateExtension(profilePath, fingerprint, profileName, watermar
     const scriptContent = getInjectScript(fingerprint, profileName, style);
     await fs.writeFile(path.join(extDir, 'content.js'), scriptContent);
 
-    // The script URL must change when Guard changes; unpacked workers can retain cached code.
-    await fs.writeFile(path.join(extDir, backgroundFile), backgroundScript);
+    await fs.writeJson(path.join(extDir, 'guard-config.json'), backgroundConfig);
+    await fs.writeFile(path.join(extDir, backgroundFile), guardBackground);
     await fs.writeFile(path.join(extDir, 'content_pw.js'), guardPasswordContent);
     await fs.writeFile(path.join(extDir, 'popup.html'), guardPopupHtml);
     await fs.writeFile(path.join(extDir, 'popup.js'), guardPopupScript);
