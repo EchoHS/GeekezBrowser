@@ -61,6 +61,24 @@
     .code-expiry { color: #a5a7b0; font-size: 11px; }
     .editor-footer { display: flex; flex-shrink: 0; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #383a40; }
     .delete-confirm { margin-top: 9px; color: #ffacb6; font-size: 12px; }
+    .passkey-panel { padding: 12px 16px 14px; border-top: 1px solid #383a40; }
+    .view-tabs { display: flex; gap: 8px; padding: 8px 16px; }
+    .view-tabs button { flex: 1; }
+    #passkeyView { max-height: 500px; overflow-y: auto; }
+    #passkeyStatus { margin: 8px 0; }
+    .passkey-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .passkey-header p, .passkey-help { margin-top: 3px; color: #a5a7b0; font-size: 11px; }
+    .passkey-toggle { margin-top: 10px; }
+    .passkey-select { margin-top: 10px; }
+    .passkey-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .passkey-credentials { max-height: 120px; margin-top: 10px; overflow-y: auto; border-top: 1px solid #383a40; }
+    .passkey-entry { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: 1px solid #383a40; }
+    .passkey-entry:last-child { border-bottom: 0; }
+    .passkey-entry-info { min-width: 0; }
+    .passkey-entry-name, .passkey-entry-site { overflow-wrap: anywhere; }
+    .passkey-entry-name { color: #e9e9ed; }
+    .passkey-entry-site { color: #a5a7b0; font-size: 11px; }
+    .passkey-entry button { min-height: 26px; padding: 2px 7px; font-size: 11px; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   </style>
 </head>
@@ -69,6 +87,10 @@
     <h1 class="brand">GeekEZ</h1>
     <span class="muted">密码管理</span>
   </header>
+  <nav id="viewTabs" class="view-tabs" aria-label="管理类型">
+    <button id="passwordTab" type="button" class="primary" aria-pressed="true">密码</button>
+    <button id="passkeyTab" type="button" aria-pressed="false">Passkey</button>
+  </nav>
   <main id="listView">
     <div class="toolbar">
       <label class="sr-only" for="search">搜索密码</label>
@@ -90,6 +112,26 @@
     <p id="listStatus" class="status" role="status" hidden></p>
     <div id="list" class="list" aria-label="已保存的密码"></div>
   </main>
+    <section id="passkeyView" class="passkey-panel" aria-labelledby="passkeyTitle" hidden>
+      <div class="passkey-header">
+        <div><h2 id="passkeyTitle">环境级 Passkey</h2><p id="passkeySummary">正在读取状态...</p></div>
+        <button id="passkeyReload" type="button" class="icon-button" title="重新加载 Passkey" aria-label="重新加载 Passkey">↻</button>
+      </div>
+      <label class="toggle passkey-toggle"><input id="passkeyEnabled" type="checkbox">启用 Passkey</label>
+      <p id="passkeyStatus" class="status" role="status" hidden></p>
+      <div id="passkeyControls" hidden>
+        <label class="field passkey-select" for="passkeyPage"><span class="field-label">授权网页</span><select id="passkeyPage"></select></label>
+        <label class="field" for="passkeyCredential"><span class="field-label">使用凭据</span><select id="passkeyCredential"></select></label>
+        <div class="passkey-actions">
+          <button id="passkeyUse" type="button" class="primary">授权使用</button>
+          <button id="passkeyRegister" type="button">授权注册</button>
+          <button id="passkeyRevoke" type="button">撤销授权</button>
+        </div>
+      </div>
+      <div id="passkeyCredentials" class="passkey-credentials"></div>
+      <p class="passkey-help">先授权，再回到网页创建或登录；授权最多持续 60 秒，完成一次操作后撤销。私钥不进入系统钥匙串。</p>
+      <p class="passkey-help">切换终端前请关闭环境并上传最新配置，另一终端下载后再启动。不要同时使用同一环境的 Passkey。</p>
+    </section>
   <form id="editor" hidden>
     <div class="editor-title">
       <button id="back" type="button" class="icon-button" title="返回密码列表" aria-label="返回密码列表">←</button>

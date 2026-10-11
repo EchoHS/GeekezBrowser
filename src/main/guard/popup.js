@@ -11,6 +11,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let editorVersion = 0;
     let loadVersion = 0;
     let qrLoader;
+    let passkeyState = { enabled: false, error: '', credentials: [], pages: [] };
+    let passkeyLoadVersion = 0;
+    let passkeyBusy = false;
 
     function request(type, payload = {}) {
         return new Promise((resolve, reject) => {
@@ -27,11 +30,176 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    async function requestPasskey(action, payload = {}) {
+        const configResponse = await fetch(chrome.runtime.getURL('guard-config.json'), { cache: 'no-store' });
+        if (!configResponse.ok) throw new Error('无法读取密码管理器配置');
+        const config = await configResponse.json();
+        if (typeof config.profileId !== 'string' || !config.profileId ||
+            !Number.isInteger(config.apiPort) || config.apiPort < 1 || config.apiPort > 65535 ||
+            typeof config.passkeyToken !== 'string' || !/^[a-f0-9]{64}$/.test(config.passkeyToken)) {
+            throw new Error('Passkey 配置无效');
+        }
+        const response = await fetch(`http://127.0.0.1:${config.apiPort}/api/passkeys/manage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profileId: config.profileId, token: config.passkeyToken, action, ...payload }),
+            signal: AbortSignal.timeout(action === 'authorize' ? 90000 : 10000)
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || `HTTP ${response.status}`);
+        return result;
+    }
+
     function status(message = '', tone = 'error', target = editor.hidden ? 'listStatus' : 'formStatus') {
         const element = $(target);
         element.textContent = message;
         element.dataset.tone = tone;
         element.hidden = !message;
+    }
+
+    function passkeyStatus(message = '', tone = 'error') {
+        const target = $('passkeyStatus');
+        target.textContent = message;
+        target.dataset.tone = tone;
+        target.hidden = !message;
+    }
+
+    function passkeyOrigin(url) {
+        try { return new URL(url).hostname; } catch { return ''; }
+    }
+
+    function selectedPasskeyPage() {
+        return passkeyState.pages.find(page => page.id === $('passkeyPage').value) || null;
+    }
+
+    function renderPasskeyCredentials() {
+        const selected = selectedPasskeyPage();
+        const hostname = selected ? passkeyOrigin(selected.url) : '';
+        const matching = hostname
+            ? passkeyState.credentials.filter(entry => hostname === entry.rpId || hostname.endsWith('.' + entry.rpId))
+            : [];
+        const credentialSelect = $('passkeyCredential');
+        const previousCredential = credentialSelect.value;
+        credentialSelect.replaceChildren();
+        credentialSelect.append(new Option(matching.length > 1 ? '请选择要使用的账号' : matching.length ? '自动选择当前网站凭据' : '当前网页没有可用凭据', ''));
+        for (const entry of matching) {
+            credentialSelect.append(new Option(
+                `${entry.userDisplayName || entry.userName || entry.rpId} · ${entry.rpId}`,
+                entry.credentialId
+            ));
+        }
+        if (matching.some(entry => entry.credentialId === previousCredential)) credentialSelect.value = previousCredential;
+        credentialSelect.disabled = !passkeyState.enabled || !matching.length || passkeyBusy || Boolean(passkeyState.error);
+        $('passkeyUse').disabled = !passkeyState.enabled || !selected || !matching.length ||
+            (matching.length > 1 && !credentialSelect.value) || passkeyBusy || Boolean(passkeyState.error);
+        $('passkeyRegister').disabled = !passkeyState.enabled || !selected || passkeyBusy || Boolean(passkeyState.error);
+        $('passkeyRevoke').disabled = passkeyBusy || !passkeyState.pages.some(page => page.authorizedUntil > Date.now());
+    }
+
+    function renderPasskeys() {
+        const enabled = passkeyState.enabled;
+        $('passkeyEnabled').checked = enabled;
+        $('passkeyEnabled').disabled = passkeyBusy;
+        $('passkeySummary').textContent = passkeyState.error
+            ? passkeyState.error
+            : `${passkeyState.credentials.length} 个凭据，${passkeyState.pages.length} 个安全网页`;
+        $('passkeyControls').hidden = !enabled;
+        const pageSelect = $('passkeyPage');
+        const previousPage = pageSelect.value;
+        pageSelect.replaceChildren();
+        if (!passkeyState.pages.length) {
+            pageSelect.append(new Option('没有可授权的 HTTPS 网页', ''));
+        } else {
+            for (const page of passkeyState.pages) pageSelect.append(new Option(page.url, page.id));
+            pageSelect.value = passkeyState.pages.some(page => page.id === previousPage) ? previousPage : passkeyState.pages[0].id;
+        }
+        pageSelect.disabled = !enabled || !passkeyState.pages.length || passkeyBusy;
+        const list = $('passkeyCredentials');
+        list.replaceChildren();
+        if (!passkeyState.credentials.length) {
+            list.append(element('div', 'empty', '尚未保存 Passkey'));
+        } else {
+            for (const entry of passkeyState.credentials) {
+                const row = element('div', 'passkey-entry');
+                const info = element('div', 'passkey-entry-info');
+                info.append(element('div', 'passkey-entry-name', entry.userDisplayName || entry.userName || '未命名用户'));
+                info.append(element('div', 'passkey-entry-site', `${entry.rpId} · 签名计数 ${entry.signCount}`));
+                const remove = button('删除', () => {
+                    if (remove.dataset.confirming === 'true') {
+                        void deletePasskey(entry.credentialId);
+                        return;
+                    }
+                    remove.dataset.confirming = 'true';
+                    remove.textContent = '确认删除';
+                    passkeyStatus('再次点击“确认删除”将移除此环境的凭据；不会删除网站上的账号。');
+                    const cancel = button('取消', () => {
+                        remove.dataset.confirming = 'false';
+                        remove.textContent = '删除';
+                        cancel.remove();
+                        passkeyStatus();
+                    });
+                    row.append(cancel);
+                }, 'danger');
+                remove.disabled = passkeyBusy;
+                row.append(info, remove);
+                list.append(row);
+            }
+        }
+        renderPasskeyCredentials();
+    }
+
+    async function loadPasskeys() {
+        if (passkeyBusy) return;
+        const version = ++passkeyLoadVersion;
+        passkeyStatus();
+        try {
+            const response = await requestPasskey('list');
+            if (version !== passkeyLoadVersion) return;
+            passkeyState = response;
+            renderPasskeys();
+        } catch (error) {
+            if (version !== passkeyLoadVersion) return;
+            passkeyState = { ...passkeyState, error: error.message };
+            renderPasskeys();
+            passkeyStatus(`读取 Passkey 失败：${error.message}`);
+        }
+    }
+
+    async function passkeyAction(operation, successMessage = '') {
+        if (passkeyBusy) return;
+        passkeyBusy = true;
+        ++passkeyLoadVersion;
+        $('passkeyReload').disabled = true;
+        renderPasskeys();
+        passkeyStatus('处理中...', 'success');
+        try {
+            passkeyState = await operation();
+            renderPasskeys();
+            if (successMessage) passkeyStatus(successMessage, 'success');
+        } catch (error) {
+            passkeyStatus(error.message || 'Passkey 操作失败');
+        } finally {
+            passkeyBusy = false;
+            $('passkeyReload').disabled = false;
+            renderPasskeys();
+        }
+    }
+
+    async function authorizePasskey(mode) {
+        const page = selectedPasskeyPage();
+        if (!page) return passkeyStatus('请选择要授权的网页');
+        const credentialId = mode === 'use' ? $('passkeyCredential').value : '';
+        await passkeyAction(
+            () => requestPasskey('authorize', { targetId: page.id, mode, ...(credentialId ? { credentialId } : {}) }),
+            mode === 'register' ? '已授权注册，请回到网页完成操作' : '已授权使用，请回到网页完成登录'
+        );
+    }
+
+    async function deletePasskey(credentialId) {
+        await passkeyAction(
+            () => requestPasskey('delete', { credentialId }),
+            'Passkey 已删除'
+        );
     }
 
     function element(tag, className, text) {
@@ -204,6 +372,7 @@ document.addEventListener('DOMContentLoaded', () => {
         $('showSecret').setAttribute('aria-label', '显示密钥');
         $('editorTitle').textContent = isEditing ? '编辑密码' : '添加密码';
         $('listView').hidden = true;
+        $('viewTabs').hidden = true;
         editor.hidden = false;
         status();
         $('url').focus();
@@ -220,6 +389,7 @@ document.addEventListener('DOMContentLoaded', () => {
         editor.reset();
         editor.hidden = true;
         $('listView').hidden = false;
+        $('viewTabs').hidden = false;
         renderList();
     }
 
@@ -390,6 +560,39 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     $('previewCode').addEventListener('click', () => preview(false));
     $('copyPreviewCode').addEventListener('click', () => preview(true));
+    $('passkeyReload').addEventListener('click', loadPasskeys);
+    $('passwordTab').addEventListener('click', () => {
+        if (!editor.hidden) return;
+        $('listView').hidden = false;
+        $('passkeyView').hidden = true;
+        $('passwordTab').classList.add('primary');
+        $('passkeyTab').classList.remove('primary');
+        $('passwordTab').setAttribute('aria-pressed', 'true');
+        $('passkeyTab').setAttribute('aria-pressed', 'false');
+    });
+    $('passkeyTab').addEventListener('click', () => {
+        if (!editor.hidden) return;
+        clearCodes();
+        $('listView').hidden = true;
+        $('passkeyView').hidden = false;
+        $('passkeyTab').classList.add('primary');
+        $('passwordTab').classList.remove('primary');
+        $('passwordTab').setAttribute('aria-pressed', 'false');
+        $('passkeyTab').setAttribute('aria-pressed', 'true');
+        void loadPasskeys();
+    });
+    $('passkeyPage').addEventListener('change', renderPasskeyCredentials);
+    $('passkeyCredential').addEventListener('change', renderPasskeyCredentials);
+    $('passkeyUse').addEventListener('click', () => authorizePasskey('use'));
+    $('passkeyRegister').addEventListener('click', () => authorizePasskey('register'));
+    $('passkeyRevoke').addEventListener('click', () => passkeyAction(() => requestPasskey('revoke'), '已撤销当前 Passkey 授权'));
+    $('passkeyEnabled').addEventListener('change', () => {
+        const enabled = $('passkeyEnabled').checked;
+        void passkeyAction(
+            () => requestPasskey('enable', { enabled }),
+            enabled ? 'Passkey 已启用' : 'Passkey 已停用'
+        );
+    });
     for (const [controlId, fieldId, label] of [['showPassword', 'password', '密码'], ['showSecret', 'twoFactorSecret', '密钥']]) {
         $(controlId).addEventListener('click', () => {
             const visible = $(fieldId).type === 'password';

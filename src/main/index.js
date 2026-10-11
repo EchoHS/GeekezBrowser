@@ -19,6 +19,7 @@ const xrayRelease = require('./xray-assets');
 const { supportsNativeGlass, getMainWindowMaterialOptions } = require('./native-glass');
 const { allocateLocalProxyPort, isXrayLocalBindFailure } = require('./local-proxy-port');
 const { createProfileSync } = require('./profile-sync');
+const { normalizePasskeyStore, createPasskeyManager } = require('./passkeys');
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
 const initSqlJs = require('sql.js');
@@ -172,6 +173,7 @@ let launchingProfiles = new Set();
 const profileResourceWrites = new Set();
 let profileApiQueue = Promise.resolve();
 let configSync = null;
+const passkeyRuntimes = new Map();
 
 function runProfileApiTask(task) {
     const result = profileApiQueue.then(task);
@@ -504,6 +506,38 @@ function createInternalApiServer() {
                 acceptLanguageHeader: state.acceptLanguageHeader || '',
                 updatedAt: state.updatedAt || 0
             }));
+        }
+
+        if (req.method === 'POST' && url.pathname === '/api/passkeys/manage') {
+            try {
+                let size = 0;
+                const chunks = [];
+                for await (const chunk of req) {
+                    size += chunk.length;
+                    if (size > 65536) throw Object.assign(new Error('请求过大'), { statusCode: 413 });
+                    chunks.push(chunk);
+                }
+                const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                if (!data || typeof data !== 'object' || Array.isArray(data)) throw Object.assign(new Error('无效的 Passkey 请求'), { statusCode: 400 });
+                const runtime = passkeyRuntimes.get(data.profileId);
+                if (!runtime || typeof data.token !== 'string' || !/^[a-f0-9]{64}$/.test(data.token) ||
+                    !crypto.timingSafeEqual(Buffer.from(data.token), Buffer.from(runtime.token))) {
+                    throw Object.assign(new Error('无效的环境 Passkey 请求'), { statusCode: 403 });
+                }
+                if (!runtime.manager) throw Object.assign(new Error('环境 Passkey 尚未就绪'), { statusCode: 409 });
+                let result;
+                if (data.action === 'list') result = await runtime.manager.summary();
+                else if (data.action === 'enable') result = await runtime.manager.setEnabled(data.enabled);
+                else if (data.action === 'authorize') result = await runtime.manager.authorize(data.targetId, data.credentialId, data.mode);
+                else if (data.action === 'revoke') result = await runtime.manager.revoke();
+                else if (data.action === 'delete') result = await runtime.manager.remove(data.credentialId);
+                else throw Object.assign(new Error('无效的 Passkey 操作'), { statusCode: 400 });
+                res.writeHead(200);
+                return res.end(JSON.stringify({ success: true, ...result }));
+            } catch (failure) {
+                res.writeHead(failure.statusCode || (failure instanceof SyntaxError ? 400 : 500));
+                return res.end(JSON.stringify({ success: false, error: failure.message }));
+            }
         }
 
         if (req.method === 'POST' && ['/generate-totp', '/validate-totp'].includes(url.pathname)) {
@@ -3209,6 +3243,14 @@ async function stopRunningProfile(profileId, options = {}) {
     if (!proc) return false;
 
     proc.stopping = true;
+    try {
+        await passkeyRuntimes.get(profileId)?.manager?.flush();
+        await passkeyRuntimes.get(profileId)?.manager?.close();
+    } catch (failure) {
+        proc.stopping = false;
+        throw failure;
+    }
+    passkeyRuntimes.delete(profileId);
     clearProfileRuntimeLanguageState(profileId);
     await forceKill(proc.xrayPid);
     try { await proc.browser.close(); } catch (e) { }
@@ -3620,6 +3662,7 @@ async function generateExtension(profilePath, fingerprint, profileName, watermar
         profileId: profileId || '',
         apiPort,
         passwords,
+        passkeyToken: passkeyRuntimes.get(profileId)?.token || '',
         snapshotRevision: syncState?.revision || ''
     };
     const backgroundFile = 'background.js';
@@ -3627,7 +3670,7 @@ async function generateExtension(profilePath, fingerprint, profileName, watermar
     const manifest = {
         manifest_version: 3,
         name: "GeekEZ Guard",
-        version: "1.2.4",
+        version: "1.3.0",
         description: "Privacy & Password Protection",
         permissions: ["storage", "activeTab"],
         host_permissions: ["http://127.0.0.1/*", "http://localhost/*"],
@@ -3678,10 +3721,12 @@ app.whenReady().then(async () => {
         paths: { DATA_PATH, PROFILES_FILE, SETTINGS_FILE, DEFAULT_PASSWORDS_FILE },
         helpers: {
             runProfileApiTask, readEncryptedPasswords, readDefaultPasswordSettings, normalizeDefaultPasswords,
+            readPasskeyStore,
             normalizeSettingsSnapshot, normalizeBookmarksDocument, buildProfileFromInput, encryptData,
             commitProfileFiles, profileResourceWrites, notifyUIRefresh,
             onSettingsApplied: settings => { cachedCloseBehavior = normalizeCloseBehavior(settings.closeBehavior); },
-            busyProfileIds: () => [...new Set([...Object.keys(activeProcesses), ...launchingProfiles])]
+            busyProfileIds: () => [...new Set([...Object.keys(activeProcesses), ...launchingProfiles,
+                ...[...passkeyRuntimes].filter(([, runtime]) => runtime.storageError).map(([id]) => id)])]
         },
         broadcast: (channel, payload) => BrowserWindow.getAllWindows().forEach(win => {
             if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(channel, payload);
@@ -5005,6 +5050,23 @@ async function writeEncryptedPasswords(pwFile, passwords, profileId) {
     await fs.writeFile(pwFile, encrypted);
 }
 
+async function readPasskeyStore(profileId) {
+    const file = path.join(DATA_PATH, profileId, 'passkeys.json');
+    if (!fs.existsSync(file)) return { version: 1, enabled: false, credentials: [] };
+    try {
+        const encrypted = await fs.readFile(file);
+        return normalizePasskeyStore(JSON.parse(decryptData(encrypted, 'GeekEZ_PK_' + profileId).toString('utf8')));
+    } catch {
+        throw new Error('环境 Passkey 库读取失败，未覆盖已有文件');
+    }
+}
+
+async function writePasskeyStore(profileId, store) {
+    const normalized = normalizePasskeyStore(store);
+    const data = encryptData(Buffer.from(JSON.stringify(normalized)), 'GeekEZ_PK_' + profileId);
+    await commitProfileFiles([{ file: path.join(DATA_PATH, profileId, 'passkeys.json'), data }]);
+}
+
 // 获取用于选择器的环境列表
 ipcMain.handle('get-export-profiles', async () => {
     const profiles = fs.existsSync(PROFILES_FILE) ? await fs.readJson(PROFILES_FILE) : [];
@@ -5847,6 +5909,10 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
 
         // 1. 生成 GeekEZ Guard 扩展（使用传递的水印样式）
         const style = watermarkStyle === 'banner' || watermarkStyle === 'off' ? watermarkStyle : 'enhanced';
+        await passkeyRuntimes.get(profileId)?.manager?.flush();
+        await passkeyRuntimes.get(profileId)?.manager?.close();
+        await readPasskeyStore(profileId);
+        passkeyRuntimes.set(profileId, { token: crypto.randomBytes(32).toString('hex'), manager: null });
         const extPath = await generateExtension(profileDir, profile.fingerprint, profile.name, style, profileId);
 
         // 2. 获取当前环境需要加载的用户扩展
@@ -6230,6 +6296,27 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             console.error('Failed to process startup pages:', e);
         }
 
+        const passkeyRuntime = passkeyRuntimes.get(profileId);
+        passkeyRuntime.manager = await createPasskeyManager({
+            browser,
+            readStore: () => readPasskeyStore(profileId),
+            writeStore: store => writePasskeyStore(profileId, store),
+            onChange: () => configSync?.schedule(),
+            confirm: async (origin, credential, mode) => {
+                const { response } = await dialog.showMessageBox({
+                    type: 'warning', buttons: ['取消', '允许本次操作'], defaultId: 0, cancelId: 0, noLink: true,
+                    title: 'GeekEZ Guard · Passkey 授权',
+                    message: mode === 'register'
+                        ? `允许环境“${profile.name}”为 ${origin} 注册新的 Passkey？`
+                        : credential
+                            ? `允许环境“${profile.name}”使用 ${origin} 的 Passkey（${credential.userDisplayName || credential.userName || credential.rpId}）？`
+                            : `允许环境“${profile.name}”使用 ${origin} 的可发现 Passkey？`,
+                    detail: '本次授权最多持续 60 秒，完成一次操作后撤销。软件认证不是 Touch ID / Windows Hello；私钥只使用当前环境的数据。'
+                });
+                return response === 1;
+            }
+        });
+
         activeProcesses[profileId] = {
             xrayPid: xrayProcess ? xrayProcess.pid : null,
             xrayProcess,
@@ -6281,7 +6368,14 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         }
 
         browser.on('disconnected', async () => {
-            if (activeProcesses[profileId]) {
+            try {
+                await passkeyRuntime.manager?.close();
+                if (passkeyRuntimes.get(profileId) === passkeyRuntime) passkeyRuntimes.delete(profileId);
+            } catch (failure) {
+                passkeyRuntime.storageError = true;
+                void dialog.showMessageBox({ type: 'error', title: 'GeekEZ Guard', message: '环境 Passkey 数据保存失败，请勿切换终端', detail: '待保存数据仍保留在当前主体内存中，请修复磁盘问题后重新启动环境。' });
+            }
+            if (activeProcesses[profileId]?.browser === browser) {
                 const proc = activeProcesses[profileId];
                 proc.stopping = true;
                 const pid = proc.xrayPid;
@@ -6315,6 +6409,11 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
 
         return switchMsg;
     } catch (err) {
+        const runtime = passkeyRuntimes.get(profileId);
+        if (!runtime?.storageError) {
+            await runtime?.manager?.close().catch(() => {});
+            passkeyRuntimes.delete(profileId);
+        }
         try {
             if (browser) await browser.close();
         } catch (e) { }
@@ -6344,8 +6443,33 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
 };
 ipcMain.handle('launch-profile', launchProfileHandler);
 
-app.on('before-quit', () => {
+let drainingPasskeys = false;
+app.on('before-quit', event => {
     isAppQuitting = true;
+    if (passkeyRuntimes.size) {
+        event.preventDefault();
+        if (launchingProfiles.size) {
+            isAppQuitting = false;
+            void dialog.showMessageBox({ type: 'info', title: 'GeekEZ Guard', message: '环境仍在启动，请等待启动完成后再退出' });
+            return;
+        }
+        if (drainingPasskeys) return;
+        drainingPasskeys = true;
+        void stopAllRunningProfilesFromTray().then(async () => {
+            for (const [id, runtime] of passkeyRuntimes) {
+                await runtime.manager?.flush();
+                await runtime.manager?.close();
+                passkeyRuntimes.delete(id);
+            }
+            drainingPasskeys = false;
+            app.quit();
+        }).catch(async failure => {
+            drainingPasskeys = false;
+            isAppQuitting = false;
+            await dialog.showMessageBox({ type: 'error', title: 'GeekEZ Guard', message: 'Passkey 数据尚未安全保存，已取消退出', detail: failure.message });
+        });
+        return;
+    }
     Object.values(activeProcesses).forEach((proc) => {
         proc.stopping = true;
     });

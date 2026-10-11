@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
 const crypto = require('crypto');
+const { normalizePasskeyStore } = require('./passkeys');
 const { WebDavSync } = require('./webdav-sync');
 const { syncError, contentHash, portableProfile, portablePasswords, portableSettings, validateRecord, validId, MAX_BYTES } = require('./sync-format');
 
@@ -54,7 +55,7 @@ function restoreBookmarks(tree, normalizeBookmarksDocument) {
 function createProfileSync({ app, safeStorage, ipcMain, dialog, paths, helpers, broadcast, fetchImpl }) {
     const { DATA_PATH, PROFILES_FILE, SETTINGS_FILE, DEFAULT_PASSWORDS_FILE } = paths;
     const {
-        runProfileApiTask, readEncryptedPasswords, readDefaultPasswordSettings, normalizeDefaultPasswords,
+        runProfileApiTask, readEncryptedPasswords, readDefaultPasswordSettings, normalizeDefaultPasswords, readPasskeyStore,
         normalizeSettingsSnapshot, normalizeBookmarksDocument, buildProfileFromInput, encryptData,
         commitProfileFiles, profileResourceWrites, busyProfileIds, notifyUIRefresh, onSettingsApplied = () => {}
     } = helpers;
@@ -83,12 +84,15 @@ function createProfileSync({ app, safeStorage, ipcMain, dialog, paths, helpers, 
                 if (ids.includes(profile.id)) continue;
                 const directory = path.join(DATA_PATH, profile.id);
                 const passwords = await readEncryptedPasswords(path.join(directory, 'passwords.json'), profile.id, { strict: true });
+                const passkeys = await fs.pathExists(path.join(directory, 'passkeys.json'))
+                    ? await readPasskeyStore(profile.id) : null;
                 const file = path.join(directory, 'browser_data', 'Default', 'Bookmarks');
                 const bookmarks = await fs.pathExists(file)
                     ? normalizeBookmarksDocument(await fs.readJson(file), { strict: true }) : normalizeBookmarksDocument({});
                 records[`profile:${profile.id}`] = {
-                    version: 1, kind: 'profile', profile: portableProfile(profile),
-                    passwords: portablePasswords(passwords), bookmarks: bookmarkTree(bookmarks)
+                    version: passkeys ? 2 : 1, kind: 'profile', profile: portableProfile(profile),
+                    passwords: portablePasswords(passwords), bookmarks: bookmarkTree(bookmarks),
+                    ...(passkeys ? { passkeys: normalizePasskeyStore(passkeys) } : {})
                 };
             }
             for (const [key, record] of Object.entries(records)) {
@@ -147,6 +151,22 @@ function createProfileSync({ app, safeStorage, ipcMain, dialog, paths, helpers, 
                     if (at < 0) profiles.push(profile); else profiles[at] = profile;
                     const passwords = portablePasswords(record.passwords);
                     const directory = path.join(DATA_PATH, profile.id);
+                    if (record.version === 2) {
+                        const passkeys = normalizePasskeyStore(record.passkeys);
+                        const existing = current.records[key]?.passkeys?.credentials || [];
+                        for (const credential of passkeys.credentials) {
+                            const previous = existing.find(entry => entry.credentialId === credential.credentialId);
+                            if (previous) {
+                                if (previous.privateKey !== credential.privateKey || previous.rpId !== credential.rpId) {
+                                    throw syncError('syncInvalidData', `profile:${profile.id}.passkeys`);
+                                }
+                                credential.signCount = Math.max(credential.signCount, previous.signCount);
+                            }
+                        }
+                        files.push({ file: path.join(directory, 'passkeys.json'), data: encryptData(Buffer.from(JSON.stringify(passkeys)), 'GeekEZ_PK_' + profile.id) });
+                    } else if (await fs.pathExists(path.join(directory, 'passkeys.json'))) {
+                        throw syncError('syncInvalidData', `profile:${profile.id}.passkeys: older snapshot cannot replace a Passkey-enabled environment`);
+                    }
                     files.push({ file: path.join(directory, 'passwords.json'), data: encryptData(Buffer.from(JSON.stringify(passwords)), 'GeekEZ_PW_' + profile.id) });
                     files.push({ file: path.join(directory, 'passwords-sync-state.json'), data: Buffer.from(JSON.stringify({ revision: crypto.randomUUID() })) });
                     files.push({ file: path.join(directory, 'browser_data', 'Default', 'Bookmarks'), data: Buffer.from(JSON.stringify(restoreBookmarks(record.bookmarks, normalizeBookmarksDocument))) });

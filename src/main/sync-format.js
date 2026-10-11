@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const zlib = require('zlib');
 const { promisify } = require('util');
+const { normalizePasskeyStore } = require('./passkeys');
 
 const scrypt = promisify(crypto.scrypt);
 const gzip = promisify(zlib.gzip);
@@ -74,7 +75,8 @@ function validId(id) {
 function validateRecord(record, key) {
     const location = key === 'settings' ? 'settings' : validId(record?.profile?.id) ? `profile:${record.profile.id}` : 'profile';
     const invalid = field => syncError('syncInvalidData', `${location}.${field}`);
-    if (!record || typeof record !== 'object' || Array.isArray(record) || record.version !== 1) throw invalid('version');
+    if (!record || typeof record !== 'object' || Array.isArray(record) ||
+        !(record.version === 1 || (key !== 'settings' && record.version === 2))) throw invalid('version');
     if (key === 'settings') {
         if (record.kind !== 'settings' || !record.settings || typeof record.settings !== 'object' || Array.isArray(record.settings)) throw invalid('record');
         const settings = record.settings;
@@ -109,6 +111,10 @@ function validateRecord(record, key) {
         }
     } else {
         if (record.kind !== 'profile') throw invalid('kind');
+        if (record.version === 2 || record.passkeys !== undefined) {
+            if (record.version !== 2) throw invalid('version');
+            try { normalizePasskeyStore(record.passkeys); } catch { throw invalid('passkeys'); }
+        }
         if (!validId(record.profile?.id) || key !== `profile:${record.profile.id}`) throw invalid('id');
         for (const field of ['name', 'proxyStr']) {
             if (typeof record.profile[field] !== 'string') throw invalid(field);

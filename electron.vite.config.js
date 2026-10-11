@@ -14,6 +14,7 @@ export default defineConfig({
           'webdav-store': resolve(__dirname, 'src/main/webdav-store.js'),
           'webdav-sync': resolve(__dirname, 'src/main/webdav-sync.js'),
           'profile-sync': resolve(__dirname, 'src/main/profile-sync.js'),
+          'passkeys': resolve(__dirname, 'src/main/passkeys.js'),
           'chromium-path': resolve(__dirname, 'src/main/chromium-path.js'),
           'close-behavior': resolve(__dirname, 'src/main/close-behavior.js'),
           'native-glass': resolve(__dirname, 'src/main/native-glass.js'),
