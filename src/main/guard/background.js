@@ -24,6 +24,7 @@ function getGuardConfig() {
             const config = await response.json();
             if (typeof config.profileId !== 'string' || !config.profileId ||
                 !Number.isInteger(config.apiPort) || config.apiPort < 1 || config.apiPort > 65535 ||
+                typeof config.apiToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(config.apiToken) ||
                 !Array.isArray(config.passwords) || typeof config.snapshotRevision !== 'string') {
                 throw new Error('密码管理器配置无效');
             }
@@ -95,8 +96,11 @@ async function postApi(endpoint, payload) {
     const config = await getGuardConfig();
     const response = await fetch('http://127.0.0.1:' + config.apiPort + endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        headers: {
+            'Authorization': 'Bearer ' + config.apiToken,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ ...payload, profileId: config.profileId }),
         signal: AbortSignal.timeout(5000)
     });
     const result = await response.json();

@@ -36,13 +36,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const config = await configResponse.json();
         if (typeof config.profileId !== 'string' || !config.profileId ||
             !Number.isInteger(config.apiPort) || config.apiPort < 1 || config.apiPort > 65535 ||
-            typeof config.passkeyToken !== 'string' || !/^[a-f0-9]{64}$/.test(config.passkeyToken)) {
+            typeof config.apiToken !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(config.apiToken)) {
             throw new Error('Passkey 配置无效');
         }
         const response = await fetch(`http://127.0.0.1:${config.apiPort}/api/passkeys/manage`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ profileId: config.profileId, token: config.passkeyToken, action, ...payload }),
+            headers: {
+                'Authorization': `Bearer ${config.apiToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ profileId: config.profileId, action, ...payload }),
             signal: AbortSignal.timeout(action === 'authorize' ? 90000 : 10000)
         });
         const result = await response.json();

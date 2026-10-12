@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, screen, shell, Tray, Menu, nativeImage, powerMonitor, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen, shell, Tray, Menu, nativeImage, powerMonitor, safeStorage, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
 const { spawn, exec, execSync } = require('child_process');
@@ -20,6 +20,19 @@ const { supportsNativeGlass, getMainWindowMaterialOptions } = require('./native-
 const { allocateLocalProxyPort, isXrayLocalBindFailure } = require('./local-proxy-port');
 const { createProfileSync } = require('./profile-sync');
 const { normalizePasskeyStore, createPasskeyManager } = require('./passkeys');
+const {
+    authorizeLocalRequest,
+    createApiToken,
+    extensionOriginForPath,
+    extractBearerToken,
+    getRequestOrigin,
+    isAllowedInternalPreflight,
+    readRequestBody,
+    secretsEqual,
+    sendForbidden,
+    setInternalCorsHeaders,
+    setJsonSecurityHeaders
+} = require('./local-api-security');
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
 const initSqlJs = require('sql.js');
@@ -184,6 +197,8 @@ function runProfileApiTask(task) {
 const runtimeProfileLanguageStates = new Map();
 let apiServer = null;
 let apiServerRunning = false;
+const publicApiToken = createApiToken();
+let exportApiGrant = null;
 let mainWindow = null; // Global reference for API-to-UI communication
 let appTray = null;
 let isAppQuitting = false;
@@ -194,41 +209,37 @@ let cachedCloseBehavior = CLOSE_BEHAVIOR.TRAY;
 // ============================================================================
 function createApiServer(port) {
     const server = http.createServer(async (req, res) => {
-        // CORS headers
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-        res.setHeader('Content-Type', 'application/json');
-
-        if (req.method === 'OPTIONS') {
-            res.writeHead(200);
-            res.end();
-            return;
-        }
-
-        const url = new URL(req.url, `http://localhost:${port}`);
-        const pathname = url.pathname;
-        const method = req.method;
-
-        // Parse body for POST/PUT
-        let body = '';
-        if (method === 'POST' || method === 'PUT') {
-            body = await new Promise(resolve => {
-                let data = '';
-                req.on('data', chunk => data += chunk);
-                req.on('end', () => resolve(data));
-            });
-        }
+        setJsonSecurityHeaders(res);
+        const authorization = authorizeLocalRequest(req, publicApiToken);
+        if (!authorization.ok) return sendForbidden(res);
 
         try {
-            const result = await handleApiRequest(method, pathname, body, url.searchParams, { req, res });
+            const url = new URL(req.url, `http://localhost:${port}`);
+            const pathname = url.pathname;
+            const method = req.method;
+
+            const isExportRoute = /^\/api\/export(?:\/|$)/.test(pathname);
+            if (isExportRoute) {
+                const exportToken = String(req.headers['x-geekez-export-token'] || '');
+                if (!exportApiGrant || exportApiGrant.expiresAt <= Date.now() ||
+                    !secretsEqual(exportToken, exportApiGrant.token)) {
+                    return sendForbidden(res);
+                }
+            }
+
+            let body = '';
+            if (method === 'POST' || method === 'PUT') {
+                body = await readRequestBody(req, 32 * 1024 * 1024);
+            }
+
+            const result = await handleApiRequest(method, pathname, body, url.searchParams, { req, res, exportAuthorized: isExportRoute });
             if (result && result.__streamHandled) {
                 return;
             }
             res.writeHead(result.status || 200);
             res.end(JSON.stringify(result.data || result));
         } catch (err) {
-            console.error('API Error:', err);
+            console.error('API Error:', err.statusCode || err.name);
             res.writeHead(err.status || err.statusCode || 500);
             res.end(JSON.stringify({ success: false, error: err.message }));
         }
@@ -456,9 +467,9 @@ async function streamApiOpenProfile({ req, res, params, settings, profile, resol
     return { __streamHandled: true };
 }
 
-// 2. 扩展密码同步与 2FA 的内部服务器 (独立端口 12139，无条件常驻)
+// 2. 扩展密码同步与 2FA 的内部服务器（随机 loopback 端口，无条件常驻）
 let internalApiServer = null;
-const INTERNAL_API_PORT = 12139;
+let internalApiPort = null;
 
 function normalizeTotpSecret(value) {
     const invalidSecret = () => Object.assign(new Error('请输入有效的 Base32 密钥（至少 16 个字符）'), { statusCode: 400 });
@@ -478,25 +489,44 @@ function normalizeTotpSecret(value) {
 
 function createInternalApiServer() {
     const server = http.createServer(async (req, res) => {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-        res.setHeader('Content-Type', 'application/json');
+        setJsonSecurityHeaders(res);
+        const origin = getRequestOrigin(req);
+        if (req.method === 'OPTIONS') {
+            const origins = [...passkeyRuntimes.values()].filter(runtime => !runtime.apiRevoked).map(runtime => runtime.extensionOrigin);
+            if (!isAllowedInternalPreflight(req, origins)) return sendForbidden(res);
+            setInternalCorsHeaders(res, origin);
+            res.writeHead(204);
+            return res.end();
+        }
 
-        if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
-
-        const url = new URL(req.url, `http://localhost:${INTERNAL_API_PORT}`);
+        const bearer = extractBearerToken(req);
+        const authenticated = [...passkeyRuntimes.entries()].find(([, runtime]) => !runtime.apiRevoked &&
+            authorizeLocalRequest(req, runtime.token, { allowChromeExtension: true, extensionOrigin: runtime.extensionOrigin }).ok);
+        if (!bearer || !authenticated) return sendForbidden(res);
+        const [authorizedProfileId, authorizedRuntime] = authenticated;
+        setInternalCorsHeaders(res, origin);
+        let url;
+        try {
+            url = new URL(req.url, 'http://127.0.0.1');
+        } catch {
+            return sendForbidden(res);
+        }
+        const sendJson = (status, payload) => {
+            res.writeHead(status);
+            res.end(JSON.stringify(payload));
+        };
+        const authorizeProfile = profileId => {
+            const runtime = passkeyRuntimes.get(profileId);
+            if (profileId !== authorizedProfileId || runtime !== authorizedRuntime || runtime.apiRevoked) return null;
+            return runtime;
+        };
 
         if (req.method === 'GET' && url.pathname === '/api/runtime/language') {
             const profileId = String(url.searchParams.get('profileId') || '').trim();
-            if (!profileId) {
-                res.writeHead(400);
-                return res.end(JSON.stringify({ success: false, error: 'profileId required' }));
-            }
-
+            if (!profileId) return sendJson(400, { success: false, error: 'profileId required' });
+            if (!authorizeProfile(profileId)) return sendForbidden(res);
             const state = getProfileRuntimeLanguageState(profileId);
-            res.writeHead(200);
-            return res.end(JSON.stringify({
+            return sendJson(200, {
                 success: true,
                 profileId,
                 enabled: !!state.enabled,
@@ -505,82 +535,53 @@ function createInternalApiServer() {
                 acceptLanguage: state.acceptLanguageHeader || '',
                 acceptLanguageHeader: state.acceptLanguageHeader || '',
                 updatedAt: state.updatedAt || 0
-            }));
+            });
         }
 
-        if (req.method === 'POST' && url.pathname === '/api/passkeys/manage') {
+        if (req.method === 'POST' && ['/api/passkeys/manage', '/generate-totp', '/validate-totp', '/api/passwords/sync'].includes(url.pathname)) {
             try {
-                let size = 0;
-                const chunks = [];
-                for await (const chunk of req) {
-                    size += chunk.length;
-                    if (size > 65536) throw Object.assign(new Error('请求过大'), { statusCode: 413 });
-                    chunks.push(chunk);
+                const bodyLimit = url.pathname === '/api/passwords/sync' ? 32 * 1024 * 1024 : 256 * 1024;
+                const data = JSON.parse(await readRequestBody(req, bodyLimit) || '{}');
+                if (!data || typeof data !== 'object' || Array.isArray(data)) throw Object.assign(new Error('请求格式无效'), { statusCode: 400 });
+                if (typeof data.profileId !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(data.profileId)) {
+                    throw Object.assign(new Error('profileId required'), { statusCode: 400 });
                 }
-                const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-                if (!data || typeof data !== 'object' || Array.isArray(data)) throw Object.assign(new Error('无效的 Passkey 请求'), { statusCode: 400 });
-                const runtime = passkeyRuntimes.get(data.profileId);
-                if (!runtime || typeof data.token !== 'string' || !/^[a-f0-9]{64}$/.test(data.token) ||
-                    !crypto.timingSafeEqual(Buffer.from(data.token), Buffer.from(runtime.token))) {
-                    throw Object.assign(new Error('无效的环境 Passkey 请求'), { statusCode: 403 });
-                }
-                if (!runtime.manager) throw Object.assign(new Error('环境 Passkey 尚未就绪'), { statusCode: 409 });
-                let result;
-                if (data.action === 'list') result = await runtime.manager.summary();
-                else if (data.action === 'enable') result = await runtime.manager.setEnabled(data.enabled);
-                else if (data.action === 'authorize') result = await runtime.manager.authorize(data.targetId, data.credentialId, data.mode);
-                else if (data.action === 'revoke') result = await runtime.manager.revoke();
-                else if (data.action === 'delete') result = await runtime.manager.remove(data.credentialId);
-                else throw Object.assign(new Error('无效的 Passkey 操作'), { statusCode: 400 });
-                res.writeHead(200);
-                return res.end(JSON.stringify({ success: true, ...result }));
-            } catch (failure) {
-                res.writeHead(failure.statusCode || (failure instanceof SyntaxError ? 400 : 500));
-                return res.end(JSON.stringify({ success: false, error: failure.message }));
-            }
-        }
+                const runtime = authorizeProfile(data.profileId);
+                if (!runtime) return sendForbidden(res);
 
-        if (req.method === 'POST' && ['/generate-totp', '/validate-totp'].includes(url.pathname)) {
-            let body = await new Promise(resolve => {
-                let data = ''; req.on('data', chunk => data += chunk); req.on('end', () => resolve(data));
-            });
-            try {
-                const data = JSON.parse(body);
-                const secret = normalizeTotpSecret(data?.secret);
-                if (url.pathname === '/validate-totp') {
-                    res.writeHead(200); return res.end(JSON.stringify({ success: true, secret }));
+                if (url.pathname === '/api/passkeys/manage') {
+                    if (!runtime.manager) throw Object.assign(new Error('环境 Passkey 尚未就绪'), { statusCode: 409 });
+                    let result;
+                    if (data.action === 'list') result = await runtime.manager.summary();
+                    else if (data.action === 'enable') result = await runtime.manager.setEnabled(data.enabled);
+                    else if (data.action === 'authorize') result = await runtime.manager.authorize(data.targetId, data.credentialId, data.mode);
+                    else if (data.action === 'revoke') result = await runtime.manager.revoke();
+                    else if (data.action === 'delete') result = await runtime.manager.remove(data.credentialId);
+                    else throw Object.assign(new Error('无效的 Passkey 操作'), { statusCode: 400 });
+                    return sendJson(200, { success: true, ...result });
                 }
-                const { generate, createGuardrails } = require('otplib');
-                // 仅在请求验证码时等待将到期的周期，避免填入后立即失效。
-                const remaining = 30000 - Date.now() % 30000;
-                if (remaining < 1500) await new Promise(resolve => setTimeout(resolve, remaining + 20));
-                const epoch = Math.floor(Date.now() / 1000);
-                const period = 30;
-                const code = await generate({
-                    secret, epoch, period, digits: 6, algorithm: 'sha1',
-                    // 兼容既有的 80-bit 服务端密钥；此接口不负责创建新密钥。
-                    guardrails: createGuardrails({ MIN_SECRET_BYTES: 10 })
-                });
-                const expiresAt = (Math.floor(epoch / period) + 1) * period * 1000;
-                res.writeHead(200); res.end(JSON.stringify({ success: true, code, expiresAt }));
-            } catch (err) {
-                res.writeHead(err.statusCode || (err instanceof SyntaxError ? 400 : 500));
-                res.end(JSON.stringify({ success: false, error: err.message }));
-            }
-        } else if (req.method === 'POST' && url.pathname === '/api/passwords/sync') {
-            let body = await new Promise(resolve => {
-                let data = ''; req.on('data', chunk => data += chunk); req.on('end', () => resolve(data));
-            });
-            try {
-                const data = JSON.parse(body);
-                if (typeof data?.profileId !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(data.profileId) || !Array.isArray(data.passwords)) {
-                    res.writeHead(400); return res.end(JSON.stringify({ success: false, error: 'profileId and passwords required' }));
+
+                if (url.pathname === '/generate-totp' || url.pathname === '/validate-totp') {
+                    const secret = normalizeTotpSecret(data.secret);
+                    if (url.pathname === '/validate-totp') return sendJson(200, { success: true, secret });
+                    const { generate, createGuardrails } = require('otplib');
+                    const remaining = 30000 - Date.now() % 30000;
+                    if (remaining < 1500) await new Promise(resolve => setTimeout(resolve, remaining + 20));
+                    const epoch = Math.floor(Date.now() / 1000);
+                    const code = await generate({
+                        secret, epoch, period: 30, digits: 6, algorithm: 'sha1',
+                        guardrails: createGuardrails({ MIN_SECRET_BYTES: 10 })
+                    });
+                    const expiresAt = (Math.floor(epoch / 30) + 1) * 30 * 1000;
+                    return sendJson(200, { success: true, code, expiresAt });
                 }
+
+                if (!Array.isArray(data.passwords)) throw Object.assign(new Error('passwords required'), { statusCode: 400 });
                 await runProfileApiTask(async () => {
+                    if (!authorizeProfile(data.profileId)) throw Object.assign(new Error('Forbidden'), { statusCode: 403 });
                     const pwFile = path.join(DATA_PATH, data.profileId, 'passwords.json');
                     const existing = await readEncryptedPasswords(pwFile, data.profileId, { strict: true });
-                    if (existing.some(entry => entry.apiUpdate?.revision &&
-                        data.apiRevisions?.[entry.id] !== entry.apiUpdate.revision)) {
+                    if (existing.some(entry => entry.apiUpdate?.revision && data.apiRevisions?.[entry.id] !== entry.apiUpdate.revision)) {
                         throw Object.assign(new Error('API 账号更新尚未导入，请关闭并重新启动环境'), { statusCode: 409 });
                     }
                     const syncStateFile = path.join(DATA_PATH, data.profileId, 'passwords-sync-state.json');
@@ -592,13 +593,13 @@ function createInternalApiServer() {
                     await writeEncryptedPasswords(pwFile, data.passwords, data.profileId);
                 });
                 configSync?.schedule();
-                res.writeHead(200); res.end(JSON.stringify({ success: true, count: data.passwords.length }));
-            } catch (err) {
-                res.writeHead(err.statusCode || 500); res.end(JSON.stringify({ success: false, error: err.message }));
+                return sendJson(200, { success: true, count: data.passwords.length });
+            } catch (failure) {
+                return sendJson(failure.statusCode || (failure instanceof SyntaxError ? 400 : 500), { success: false, error: failure.message });
             }
-        } else {
-            res.writeHead(404); res.end(JSON.stringify({ success: false, error: 'Endpoint not found' }));
         }
+
+        return sendForbidden(res);
     });
     return server;
 }
@@ -2673,7 +2674,8 @@ async function saveApiProfile(body, idOrName = null) {
 
 async function handleApiRequest(method, pathname, body, params, context = {}) {
     const profileMatch = pathname.match(/^\/api\/profiles\/([^\/]+)$/);
-    if (((method === 'DELETE' && profileMatch) || (method === 'POST' && pathname === '/api/import')) && !context.serialized) {
+    const exportPath = /^\/api\/export(?:\/|$)/.test(pathname);
+    if (((method === 'DELETE' && profileMatch) || (method === 'POST' && (pathname === '/api/import' || exportPath))) && !context.serialized) {
         return runProfileApiTask(() => handleApiRequest(method, pathname, body, params, { ...context, serialized: true }));
     }
     if (method === 'POST' && pathname === '/api/profiles') {
@@ -2805,19 +2807,44 @@ async function handleApiRequest(method, pathname, body, params, context = {}) {
 
 
 
-    // GET /api/export/all?password=xxx - Export full backup (v2)
-    // GET /api/export/profile/:idOrName?password=xxx - Export one profile backup
+    // POST /api/export/all - Export full backup (v2), with an explicit export grant.
+    // POST /api/export/profile/:idOrName - Export one profile backup.
     const exportFullMatch = pathname.match(/^\/api\/export\/(all|profile)(?:\/([^\/]+))?$/);
-    if (method === 'GET' && exportFullMatch) {
+    if (exportFullMatch) {
+        if (!context.exportAuthorized) return { status: 403, data: { success: false, error: 'Forbidden' } };
+        if (method !== 'POST') return { status: 405, data: { success: false, error: 'Use POST for sensitive exports' } };
+        let exportRequest;
+        try {
+            exportRequest = JSON.parse(body || '{}');
+        } catch {
+            return { status: 400, data: { success: false, error: 'Request body must be valid JSON' } };
+        }
+        if (!exportRequest || typeof exportRequest !== 'object' || Array.isArray(exportRequest)) {
+            return { status: 400, data: { success: false, error: 'Request body must be a JSON object' } };
+        }
+        if (params.has('password')) {
+            return { status: 400, data: { success: false, error: 'Password must be sent in the request body' } };
+        }
+        const exportParams = new URLSearchParams(params);
+        for (const key of ['id', 'ids', 'profileId', 'profileIds', 'name', 'names', 'profile', 'profiles']) {
+            exportParams.delete(key);
+            const values = Array.isArray(exportRequest[key]) ? exportRequest[key] : [exportRequest[key]];
+            for (const value of values) {
+                if (value !== undefined && value !== null) exportParams.append(key, String(value));
+            }
+        }
         const exportKind = exportFullMatch[1];
-        const selection = resolveApiExportProfiles(profiles, params, exportFullMatch[2] || '');
+        const selection = resolveApiExportProfiles(profiles, exportParams, exportFullMatch[2] || '');
         if (selection.error) return selection.error;
         if (exportKind === 'profile' && selection.selectedAll) {
             return { status: 400, data: { success: false, error: 'Profile id or name required' } };
         }
-        const password = params.get('password');
-        if (!password) return { status: 400, data: { success: false, error: 'Password required. Use ?password=yourpassword' } };
+        const password = typeof exportRequest.password === 'string' ? exportRequest.password : '';
+        if (!password || password.length > 1024) return { status: 400, data: { success: false, error: 'Password required in the request body' } };
         const selectedProfiles = selection.profiles;
+        if (selectedProfiles.some(profile => activeProcesses[profile.id] || launchingProfiles.has(profile.id))) {
+            return { status: 409, data: { success: false, error: 'Stop selected profiles before exporting browser data' } };
+        }
 
         const backupData = {
             version: 2,
@@ -2883,10 +2910,32 @@ async function handleApiRequest(method, pathname, body, params, context = {}) {
         };
     }
 
-    // GET /api/export/fingerprint - Export YAML fingerprints
+    // POST /api/export/fingerprint - Export YAML fingerprints
     const exportFingerprintMatch = pathname.match(/^\/api\/export\/fingerprint(?:\/([^\/]+))?$/);
-    if (method === 'GET' && exportFingerprintMatch) {
-        const selection = resolveApiExportProfiles(profiles, params, exportFingerprintMatch[1] || '');
+    if (exportFingerprintMatch) {
+        if (!context.exportAuthorized) return { status: 403, data: { success: false, error: 'Forbidden' } };
+        if (method !== 'POST') return { status: 405, data: { success: false, error: 'Use POST for sensitive exports' } };
+        let exportRequest;
+        try {
+            exportRequest = JSON.parse(body || '{}');
+        } catch {
+            return { status: 400, data: { success: false, error: 'Request body must be valid JSON' } };
+        }
+        if (!exportRequest || typeof exportRequest !== 'object' || Array.isArray(exportRequest)) {
+            return { status: 400, data: { success: false, error: 'Request body must be a JSON object' } };
+        }
+        if (params.has('password')) {
+            return { status: 400, data: { success: false, error: 'Password must be sent in the request body' } };
+        }
+        const exportParams = new URLSearchParams(params);
+        for (const key of ['id', 'ids', 'profileId', 'profileIds', 'name', 'names', 'profile', 'profiles']) {
+            exportParams.delete(key);
+            const values = Array.isArray(exportRequest[key]) ? exportRequest[key] : [exportRequest[key]];
+            for (const value of values) {
+                if (value !== undefined && value !== null) exportParams.append(key, String(value));
+            }
+        }
+        const selection = resolveApiExportProfiles(profiles, exportParams, exportFingerprintMatch[1] || '');
         if (selection.error) return selection.error;
         const selectedProfiles = selection.profiles;
         const exportData = selectedProfiles.map(p => ({
@@ -2996,6 +3045,7 @@ ipcMain.handle('stop-api-server', async () => {
         apiServer.close(() => {
             apiServer = null;
             apiServerRunning = false;
+            exportApiGrant = null;
             console.log('🔌 API Server stopped');
             resolve({ success: true });
         });
@@ -3003,7 +3053,36 @@ ipcMain.handle('stop-api-server', async () => {
 });
 
 ipcMain.handle('get-api-status', () => {
-    return { running: apiServerRunning };
+    return { running: apiServerRunning, authenticationRequired: true };
+});
+
+function isTrustedMainWindowEvent(event) {
+    return !!mainWindow && !mainWindow.isDestroyed() && event?.sender === mainWindow.webContents &&
+        (!event.senderFrame || !event.senderFrame.parent);
+}
+
+ipcMain.handle('copy-api-token', (event) => {
+    if (!isTrustedMainWindowEvent(event)) throw new Error('Unauthorized');
+    clipboard.writeText(publicApiToken);
+    return { success: true };
+});
+
+ipcMain.handle('copy-api-export-token', async (event) => {
+    if (!isTrustedMainWindowEvent(event)) throw new Error('Unauthorized');
+    const { response } = await dialog.showMessageBox({
+        type: 'warning',
+        buttons: ['取消', '复制导出授权令牌'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        title: 'GeekEZ Browser · 敏感导出授权',
+        message: '导出授权令牌可以读取环境指纹、Cookie、浏览器数据和 Guard 密码。',
+        detail: '仅复制给你信任的本地自动化程序。令牌 5 分钟后失效；导出请求仍需公共 API 令牌。'
+    });
+    if (response !== 1) return { success: false, canceled: true };
+    exportApiGrant = { token: createApiToken(), expiresAt: Date.now() + 5 * 60 * 1000 };
+    clipboard.writeText(exportApiGrant.token);
+    return { success: true, expiresAt: exportApiGrant.expiresAt };
 });
 
 
@@ -3649,6 +3728,9 @@ function notifyUIRefresh() {
 async function generateExtension(profilePath, fingerprint, profileName, watermarkStyle, profileId) {
     const extDir = path.join(profilePath, 'extension');
     await fs.ensureDir(extDir);
+    const runtime = passkeyRuntimes.get(profileId);
+    if (!runtime) throw new Error('GeekEZ Guard runtime is not ready');
+    runtime.extensionOrigin = extensionOriginForPath(await fs.realpath(extDir));
 
     // 读取已保存的密码 (解密)
     const pwFile = path.join(DATA_PATH, profileId, 'passwords.json');
@@ -3656,13 +3738,16 @@ async function generateExtension(profilePath, fingerprint, profileName, watermar
     const syncStateFile = path.join(DATA_PATH, profileId, 'passwords-sync-state.json');
     const syncState = fs.existsSync(syncStateFile) ? await fs.readJson(syncStateFile) : null;
 
-    // 内部扩展固定使用独立端口 12139
-    const apiPort = INTERNAL_API_PORT;
+    if (!Number.isInteger(internalApiPort) || internalApiPort <= 0) {
+        throw new Error('GeekEZ Guard internal service is not ready');
+    }
+    const apiPort = internalApiPort;
+    const apiToken = passkeyRuntimes.get(profileId)?.token || '';
     const backgroundConfig = {
         profileId: profileId || '',
         apiPort,
+        apiToken,
         passwords,
-        passkeyToken: passkeyRuntimes.get(profileId)?.token || '',
         snapshotRevision: syncState?.revision || ''
     };
     const backgroundFile = 'background.js';
@@ -3670,7 +3755,7 @@ async function generateExtension(profilePath, fingerprint, profileName, watermar
     const manifest = {
         manifest_version: 3,
         name: "GeekEZ Guard",
-        version: "1.3.0",
+        version: "1.3.1",
         description: "Privacy & Password Protection",
         permissions: ["storage", "activeTab"],
         host_permissions: ["http://127.0.0.1/*", "http://localhost/*"],
@@ -3739,16 +3824,18 @@ app.whenReady().then(async () => {
     });
     cachedCloseBehavior = normalizeCloseBehavior(readSettingsSync().closeBehavior);
     initializeProxyRecoveryMonitor();
-    createWindow();
-    await createTray().catch((err) => {
-        console.error('Failed to initialize tray:', err);
-    });
 
-    // Auto-start internal API server explicitly for GeekEZ Guard
+    // Start the authenticated Guard API before any environment can generate its config.
     try {
         internalApiServer = createInternalApiServer();
-        internalApiServer.listen(INTERNAL_API_PORT, '127.0.0.1', () => {
-            console.log(`🛡️ Internal Guard Server auto-started on http://localhost:${INTERNAL_API_PORT}`);
+        await new Promise((resolve, reject) => {
+            internalApiServer.once('error', reject);
+            internalApiServer.listen(0, '127.0.0.1', () => {
+                internalApiServer.off('error', reject);
+                internalApiPort = internalApiServer.address().port;
+                console.log('🛡️ Internal Guard Server started on an ephemeral loopback port');
+                resolve();
+            });
         });
         internalApiServer.on('error', (err) => {
             console.error('Internal Guard Server failed to start:', err);
@@ -3756,6 +3843,11 @@ app.whenReady().then(async () => {
     } catch (e) {
         console.error('Failed to auto-start Internal Guard Server:', e);
     }
+
+    createWindow();
+    await createTray().catch((err) => {
+        console.error('Failed to initialize tray:', err);
+    });
 
     // Auto-start public API server if enabled
     try {
@@ -5912,7 +6004,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         await passkeyRuntimes.get(profileId)?.manager?.flush();
         await passkeyRuntimes.get(profileId)?.manager?.close();
         await readPasskeyStore(profileId);
-        passkeyRuntimes.set(profileId, { token: crypto.randomBytes(32).toString('hex'), manager: null });
+        passkeyRuntimes.set(profileId, { token: createApiToken(), manager: null });
         const extPath = await generateExtension(profileDir, profile.fingerprint, profile.name, style, profileId);
 
         // 2. 获取当前环境需要加载的用户扩展
@@ -6373,6 +6465,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                 if (passkeyRuntimes.get(profileId) === passkeyRuntime) passkeyRuntimes.delete(profileId);
             } catch (failure) {
                 passkeyRuntime.storageError = true;
+                passkeyRuntime.apiRevoked = true;
                 void dialog.showMessageBox({ type: 'error', title: 'GeekEZ Guard', message: '环境 Passkey 数据保存失败，请勿切换终端', detail: '待保存数据仍保留在当前主体内存中，请修复磁盘问题后重新启动环境。' });
             }
             if (activeProcesses[profileId]?.browser === browser) {

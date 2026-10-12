@@ -26,6 +26,14 @@ export const settingService = {
         return await ipcService.invoke('get-api-status');
     },
 
+    async copyApiToken() {
+        return await ipcService.invoke('copy-api-token');
+    },
+
+    async copyApiExportToken() {
+        return await ipcService.invoke('copy-api-export-token');
+    },
+
     /**
      * 扩展/插件管理
      */
