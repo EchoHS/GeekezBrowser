@@ -1209,9 +1209,10 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                 }
             } catch (e) { }
 
+            const webglInfo = fp.webgl || {};
+
             // --- 7. WebGL spoof ---
             if (enableWebglSpoof || enableUaSpoof) {
-            const webglInfo = fp.webgl || {};
             const patchedWebglPrototypes = new WeakSet();
             const patchedContextFactories = new WeakSet();
             const debugExt = {
@@ -1438,14 +1439,20 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                 patchGpuAdapter(navigator.gpu);
             }
 
+            }
+
             // --- 7.2 Worker realm bridge ---
             // BrowserScan/PixelScan can read Canvas, hardware, GPU and UA from workers.
             // Inject the same profile into worker contexts via constructor wrappers.
+            const hasHardwareOverride = [fp.hardwareConcurrency, fp.deviceMemory]
+                .some(value => Number.isFinite(Number(value)) && Number(value) > 0);
+            if (hasHardwareOverride || enableWebglSpoof || enableUaSpoof) {
             try {
-                const buildWorkerBootstrap = (sourceUrl, isModule) => {
+                const buildWorkerBootstrap = (sourceUrl, isModule, sourceText) => {
                     const payload = JSON.stringify({
                         uaMode: fp.uaMode || 'spoof',
                         enableWebglSpoof: enableWebglSpoof,
+                        enableCanvasSpoof: enableUaSpoof || enableWebglSpoof,
                         userAgent: targetUa,
                         userAgentMetadata: targetMeta,
                         platform: targetPlatform,
@@ -1511,7 +1518,7 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                             }
 
                             // Keep Worker OffscreenCanvas reads aligned with the page realm.
-                            try {
+                            if (workerPayload.enableCanvasSpoof) try {
                                 const contextPrototype = self.OffscreenCanvasRenderingContext2D && self.OffscreenCanvasRenderingContext2D.prototype;
                                 const offscreenPrototype = self.OffscreenCanvas && self.OffscreenCanvas.prototype;
                                 const originalGetImageData = contextPrototype && contextPrototype.getImageData;
@@ -1800,7 +1807,22 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                     if (isModule) {
                         return bootstrap + '\\nimport(' + JSON.stringify(sourceUrl) + ');';
                     }
-                    return bootstrap + '\\nimportScripts(' + JSON.stringify(sourceUrl) + ');';
+                    return bootstrap + '\\n' + (sourceText || 'importScripts(' + JSON.stringify(sourceUrl) + ');');
+                };
+
+                const readBlobWorkerSource = (sourceUrl, seen = new Set()) => {
+                    if (!String(sourceUrl).startsWith('blob:') || seen.has(sourceUrl)) return '';
+                    seen.add(sourceUrl);
+                    const request = new XMLHttpRequest();
+                    request.open('GET', sourceUrl, false);
+                    request.send();
+                    if (request.status !== 200 && request.status !== 0) return '';
+                    let source = String(request.responseText || '');
+                    source = source.replace(/\\bimportScripts\\(\\s*(['"])(blob:[^'"]+)\\1\\s*\\)/g, (match, quote, nestedUrl) => {
+                        const nestedSource = readBlobWorkerSource(nestedUrl, seen);
+                        return nestedSource || match;
+                    });
+                    return source;
                 };
 
                 const wrapWorkerConstructor = (ctorName) => {
@@ -1811,7 +1833,8 @@ function getInjectScript(fp, profileName, watermarkStyle) {
                         try {
                             const originalUrl = new URL(String(scriptURL), location.href).href;
                             const isModule = !!(optionsOrName && typeof optionsOrName === 'object' && optionsOrName.type === 'module');
-                            const bootstrapCode = buildWorkerBootstrap(originalUrl, isModule);
+                            const sourceText = isModule ? '' : readBlobWorkerSource(originalUrl);
+                            const bootstrapCode = buildWorkerBootstrap(originalUrl, isModule, sourceText);
                             const blob = new Blob([bootstrapCode], { type: 'application/javascript' });
                             const blobUrl = URL.createObjectURL(blob);
                             const worker = new OriginalCtor(blobUrl, optionsOrName);
