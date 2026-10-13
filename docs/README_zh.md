@@ -71,10 +71,10 @@
 
 ### 方法 1: 下载安装包 (推荐)
 前往 [**Releases**](https://github.com/EchoHS/GeekezBrowser/releases) 页面下载适配您系统的安装包：
-*   **Windows**: `GeekEZ Browser-{version}-win-x64.exe`
-*   **macOS (ARM64)**: `GeekEZ Browser-{version}-mac-arm64.dmg`
-*   **macOS (Intel)**: `GeekEZ Browser-{version}-mac-x64.dmg`
-*   **Linux**: `GeekEZ Browser-{version}-linux-x64.AppImage`
+*   **Windows**: `GeekEZ Browser-{version}-x64.exe`
+*   **macOS (ARM64)**: `GeekEZ Browser-{version}-arm64.dmg`
+*   **macOS (Intel)**: `GeekEZ Browser-{version}-x64.dmg`
+*   **Linux**: `GeekEZ Browser-{version}-x64.AppImage`
 
 ### 方法 2: 源码运行
 
