@@ -115,13 +115,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useUIStore } from '../store/useUIStore';
 import { ipcService } from '../services/ipc.service';
 
 const uiStore = useUIStore();
 const activeTab = ref('manual');
-const curLang = ref(localStorage.getItem('geekez_lang') || 'cn');
+const curLang = computed(() => uiStore.lang);
 const appVersion = ref('v...');
 
 function openExternal(url) {
@@ -144,12 +144,8 @@ window.switchHelpTab = (tabName) => {
     activeTab.value = tabName;
 };
 
-// 监听语言变化
 onMounted(() => {
     loadAppVersion();
-    window.addEventListener('storage', () => {
-        curLang.value = localStorage.getItem('geekez_lang') || 'cn';
-    });
 });
 </script>
 

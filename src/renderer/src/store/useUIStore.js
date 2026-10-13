@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { ipcService } from '../services/ipc.service';
+import { resolveConfiguredLanguage } from '../utils/language';
 
 export const useUIStore = defineStore('ui', () => {
     // Modal visibility states
@@ -22,7 +23,8 @@ export const useUIStore = defineStore('ui', () => {
     
     // UI Theme & Lang
     const theme = ref(localStorage.getItem('geekez_theme') || 'geek');
-    const lang = ref(localStorage.getItem('geekez_lang') || 'cn');
+    const storedLanguage = localStorage.getItem('geekez_lang');
+    const lang = ref(resolveConfiguredLanguage(storedLanguage, navigator.language));
 
     // Dialog messages
     const alertMsg = ref('');
@@ -111,11 +113,13 @@ export const useUIStore = defineStore('ui', () => {
             .catch(e => console.warn('[UIStore] Failed to persist theme:', e));
     };
 
-    const setLanguage = (newLang, persist = true) => {
-        if (!['cn', 'en'].includes(newLang)) return;
-        lang.value = newLang;
-        window.curLang = newLang;
-        localStorage.setItem('geekez_lang', newLang);
+    const setLanguage = (newLang, persist = true, systemLocale = navigator.language) => {
+        if (!['cn', 'en', 'auto'].includes(newLang)) return;
+        const effectiveLanguage = resolveConfiguredLanguage(newLang, systemLocale);
+        lang.value = effectiveLanguage;
+        window.curLang = effectiveLanguage;
+        if (newLang === 'auto') localStorage.removeItem('geekez_lang');
+        else localStorage.setItem('geekez_lang', newLang);
         if (persist) ipcService.saveSettings({ lang: newLang })
             .catch((e) => console.warn('[UIStore] Failed to persist language setting:', e));
     };

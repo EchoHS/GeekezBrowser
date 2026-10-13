@@ -9,6 +9,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/main/index.js'),
+          language: resolve(__dirname, 'src/main/language.js'),
           'sync-format': resolve(__dirname, 'src/main/sync-format.js'),
           'sync-revisions': resolve(__dirname, 'src/main/sync-revisions.js'),
           'webdav-store': resolve(__dirname, 'src/main/webdav-store.js'),

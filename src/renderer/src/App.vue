@@ -91,13 +91,13 @@ onMounted(async () => {
     try {
         unsubscribeSync = window.electronAPI?.onSyncSettingsApplied?.(async settings => {
             uiStore.setTheme(settings.theme, false);
-            uiStore.setLanguage(settings.lang, false);
+            uiStore.setLanguage(settings.lang, false, settings.systemLanguage);
             await settingsStore.loadSettings();
             await proxyStore.loadSettings();
         });
         const saved = await ipcService.getSettings();
         uiStore.setTheme(saved?.theme || uiStore.theme, !saved?.theme);
-        uiStore.setLanguage(saved?.lang || uiStore.lang, !saved?.lang);
+        uiStore.setLanguage(saved?.lang || 'auto', !saved?.lang, saved?.systemLanguage);
         console.log('[App] Initializing service listeners...');
         profileService.onStatusChange(({ id, status }) => {
             if (window.profileStore) {

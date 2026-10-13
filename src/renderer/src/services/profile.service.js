@@ -19,7 +19,8 @@ export const profileService = {
             const settings = await ipcService.getSettings().catch(() => null);
             const rawWatermarkStyle = settings?.watermarkStyle || localStorage.getItem('geekez_watermark_style') || 'enhanced';
             const watermarkStyle = rawWatermarkStyle === 'banner' || rawWatermarkStyle === 'off' ? rawWatermarkStyle : 'enhanced';
-            const lang = localStorage.getItem('geekez_lang') === 'en' ? 'en' : 'cn';
+            const lang = window.uiStore?.lang ||
+                (String(navigator.language || '').toLowerCase().startsWith('zh') ? 'cn' : 'en');
             const msg = await ipcService.invoke('launch-profile', id, watermarkStyle, lang);
             return {
                 success: true,

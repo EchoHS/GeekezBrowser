@@ -20,6 +20,7 @@ const { supportsNativeGlass, getMainWindowMaterialOptions } = require('./native-
 const { allocateLocalProxyPort, isXrayLocalBindFailure } = require('./local-proxy-port');
 const { createProfileSync } = require('./profile-sync');
 const { normalizePasskeyStore, createPasskeyManager } = require('./passkeys');
+const { resolveConfiguredLanguage, resolveSystemLanguage } = require('./language');
 const {
     authorizeLocalRequest,
     createApiToken,
@@ -252,7 +253,19 @@ function resolveApiPreferredLang(params, settings = {}) {
     const rawLang = String(params?.get('lang') || '').trim().toLowerCase();
     if (rawLang === 'en') return 'en';
     if (rawLang === 'cn' || rawLang === 'zh' || rawLang === 'zh-cn') return 'cn';
-    return settings.lang === 'en' ? 'en' : 'cn';
+    return resolveSettingsUiLanguage(settings);
+}
+
+function getSystemUiLanguage() {
+    try {
+        return resolveSystemLanguage(app.getLocale ? app.getLocale() : '');
+    } catch (error) {
+        return resolveSystemLanguage('');
+    }
+}
+
+function resolveSettingsUiLanguage(settings = {}) {
+    return resolveConfiguredLanguage(settings, getSystemUiLanguage() === 'cn' ? 'zh-CN' : 'en-US');
 }
 
 function shouldStreamApiOpenRequest(req, params) {
@@ -1366,7 +1379,7 @@ function normalizeSettingsSnapshot(settings) {
     if (!Array.isArray(nextSettings.preProxies)) nextSettings.preProxies = [];
     if (!Array.isArray(nextSettings.subscriptions)) nextSettings.subscriptions = [];
     if (!['single', 'balance', 'failover'].includes(nextSettings.mode)) nextSettings.mode = 'single';
-    nextSettings.lang = nextSettings.lang === 'en' ? 'en' : 'cn';
+    nextSettings.lang = ['cn', 'en', 'auto'].includes(nextSettings.lang) ? nextSettings.lang : 'auto';
     nextSettings.enablePreProxy = !!nextSettings.enablePreProxy;
     nextSettings.notify = !!nextSettings.notify;
     nextSettings.userExtensions = normalizeUserExtensions(nextSettings.userExtensions || []);
@@ -3423,7 +3436,7 @@ async function buildTrayMenuTemplate() {
     const profiles = await readAllProfilesSafe();
     const runningIds = new Set(Object.keys(activeProcesses));
     const launchingIds = new Set(Array.from(launchingProfiles));
-    const lang = readSettingsSync().lang === 'en' ? 'en' : 'cn';
+    const lang = resolveSettingsUiLanguage(readSettingsSync());
 
     const createProfileMenuItem = (profile) => ({
         label: `${runningIds.has(profile.id) ? '🟢 ' : (launchingIds.has(profile.id) ? '🟡 ' : '')}${profile.name || profile.id}`,
@@ -3603,7 +3616,7 @@ function resolveWindowIconPath() {
 }
 
 function buildTrayTooltip() {
-    const lang = readSettingsSync().lang === 'en' ? 'en' : 'cn';
+    const lang = resolveSettingsUiLanguage(readSettingsSync());
     const launchingCount = launchingProfiles.size;
     const runningCount = Object.keys(activeProcesses).length;
 
@@ -4713,6 +4726,7 @@ ipcMain.handle('get-settings', async () => {
         : defaultPasswordSettings.scope;
     return {
             ...normalized,
+            systemLanguage: getSystemUiLanguage(),
             defaultPasswords: defaultPasswordSettings.passwords,
             defaultPasswordScope: scope,
             ...(fs.existsSync(SETTINGS_FILE) ? {} : {
@@ -5603,9 +5617,12 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         throw profileResourceError('Profile data is being updated; retry launching shortly', 409);
     }
     const sender = event.sender;
+    const launchLanguage = preferredLang === 'en' || preferredLang === 'cn'
+        ? preferredLang
+        : resolveSettingsUiLanguage(readSettingsSync());
     const launchArgsOverride = normalizeLaunchOverrideArgs(launchOptions.launchArgsOverride || []);
-    const progressTitle = preferredLang === 'en' ? 'Launching Profile' : '正在启动环境';
-    const progressWarn = preferredLang === 'en'
+    const progressTitle = launchLanguage === 'en' ? 'Launching Profile' : '正在启动环境';
+    const progressWarn = launchLanguage === 'en'
         ? 'Please wait while the environment starts. Do not close the application.'
         : '环境启动中，请稍候，不要关闭软件。';
     const totalProgressSteps = 10;
@@ -5667,7 +5684,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
     }
 
     if (launchingProfiles.has(profileId)) {
-        return preferredLang === 'en' ? 'Profile is starting' : '环境启动中';
+        return launchLanguage === 'en' ? 'Profile is starting' : '环境启动中';
     }
 
     if (profileResourceWrites.has(profileId)) {
@@ -5676,7 +5693,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
     await markLaunching(true);
     updateLaunchProgress(
         5,
-        preferredLang === 'en' ? 'Loading profile settings...' : '正在读取环境配置...',
+        launchLanguage === 'en' ? 'Loading profile settings...' : '正在读取环境配置...',
         true,
         { step: 1 }
     );
@@ -5691,7 +5708,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         mode: 'single',
         enablePreProxy: false
     }));
-    const uiLang = preferredLang === 'en' ? 'en' : (settings.lang === 'en' ? 'en' : 'cn');
+    const uiLang = launchLanguage;
 
     const profiles = await fs.readJson(PROFILES_FILE);
     const profileIndex = profiles.findIndex(p => p.id === profileId);
@@ -5703,7 +5720,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
     profile.fingerprint = normalizeFingerprint(profile.fingerprint || {});
     updateLaunchProgress(
         12,
-        preferredLang === 'en' ? 'Validating profile configuration...' : '正在校验环境配置...',
+        launchLanguage === 'en' ? 'Validating profile configuration...' : '正在校验环境配置...',
         true,
         { step: 2, profileName: progressProfileName }
     );
@@ -5758,7 +5775,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
 
         updateLaunchProgress(
             20,
-            preferredLang === 'en' ? 'Preparing browser workspace...' : '正在准备浏览器工作区...',
+            launchLanguage === 'en' ? 'Preparing browser workspace...' : '正在准备浏览器工作区...',
             true,
             { step: 3, profileName: progressProfileName }
         );
@@ -5791,8 +5808,8 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             updateLaunchProgress(
                 32,
                 activePreProxy
-                    ? (preferredLang === 'en' ? 'Starting proxy chain service...' : '正在启动代理链服务...')
-                    : (preferredLang === 'en' ? 'Starting profile proxy service...' : '正在启动环境代理服务...'),
+                    ? (launchLanguage === 'en' ? 'Starting proxy chain service...' : '正在启动代理链服务...')
+                    : (launchLanguage === 'en' ? 'Starting profile proxy service...' : '正在启动环境代理服务...'),
                 true,
                 { step: 4, profileName: progressProfileName }
             );
@@ -5808,7 +5825,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             const throwPreProxyCheckError = (preProxyCheck) => {
                 updateLaunchProgress(
                     56,
-                    preferredLang === 'en'
+                    launchLanguage === 'en'
                         ? `Checking pre-proxy node${preProxyLabel ? ` [${preProxyLabel}]` : ''}...`
                         : `正在检测前置代理节点${preProxyLabel ? ` [${preProxyLabel}]` : ''}...`,
                     true,
@@ -5848,8 +5865,8 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                 updateLaunchProgress(
                     40,
                     attempt === 1
-                        ? (preferredLang === 'en' ? 'Waiting for local proxy port...' : '正在等待本地代理端口就绪...')
-                        : (preferredLang === 'en' ? 'Retrying local proxy port...' : '正在重新分配本地代理端口...'),
+                        ? (launchLanguage === 'en' ? 'Waiting for local proxy port...' : '正在等待本地代理端口就绪...')
+                        : (launchLanguage === 'en' ? 'Retrying local proxy port...' : '正在重新分配本地代理端口...'),
                     true,
                     { step: 4, profileName: progressProfileName }
                 );
@@ -5885,8 +5902,8 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             updateLaunchProgress(
                 48,
                 activePreProxy
-                    ? (preferredLang === 'en' ? 'Checking proxy chain availability...' : '正在检测代理链可用性...')
-                    : (preferredLang === 'en' ? 'Checking profile proxy availability...' : '正在检测环境代理可用性...'),
+                    ? (launchLanguage === 'en' ? 'Checking proxy chain availability...' : '正在检测代理链可用性...')
+                    : (launchLanguage === 'en' ? 'Checking profile proxy availability...' : '正在检测环境代理可用性...'),
                 true,
                 { step: 5, profileName: progressProfileName }
             );
@@ -5914,7 +5931,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
                 if (activePreProxy?.url) {
                     updateLaunchProgress(
                         56,
-                        preferredLang === 'en'
+                        launchLanguage === 'en'
                             ? `Checking pre-proxy node${preProxyLabel ? ` [${preProxyLabel}]` : ''}...`
                             : `正在检测前置代理节点${preProxyLabel ? ` [${preProxyLabel}]` : ''}...`,
                         true,
@@ -5938,7 +5955,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         } else {
             updateLaunchProgress(
                 48,
-                preferredLang === 'en' ? 'Using direct network path...' : '正在使用直连网络...',
+                launchLanguage === 'en' ? 'Using direct network path...' : '正在使用直连网络...',
                 true,
                 { step: 5, profileName: progressProfileName }
             );
@@ -5948,7 +5965,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         if (autoIpBasePolicy.enabled) {
             updateLaunchProgress(
                 58,
-                preferredLang === 'en' ? 'Resolving IP-based fingerprint...' : '正在解析基于 IP 的指纹...',
+                launchLanguage === 'en' ? 'Resolving IP-based fingerprint...' : '正在解析基于 IP 的指纹...',
                 true,
                 { step: 6, profileName: progressProfileName }
             );
@@ -5965,7 +5982,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
 
         updateLaunchProgress(
             66,
-            preferredLang === 'en' ? 'Preparing fingerprint parameters...' : '正在准备指纹参数...',
+            launchLanguage === 'en' ? 'Preparing fingerprint parameters...' : '正在准备指纹参数...',
             true,
             { step: 6, profileName: progressProfileName }
         );
@@ -6010,7 +6027,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         // 2. 获取当前环境需要加载的用户扩展
         updateLaunchProgress(
             76,
-            preferredLang === 'en' ? 'Loading browser extensions...' : '正在加载浏览器扩展...',
+            launchLanguage === 'en' ? 'Loading browser extensions...' : '正在加载浏览器扩展...',
             true,
             { step: 7, profileName: progressProfileName }
         );
@@ -6110,7 +6127,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             console.log('⚡ API Launch Args Override:', launchArgsOverride.join(' '));
             updateLaunchProgress(
                 84,
-                preferredLang === 'en'
+                launchLanguage === 'en'
                     ? `Applying temporary launch args: ${launchArgsOverride.join(' ')}`
                     : `正在应用本次临时启动参数：${launchArgsOverride.join(' ')}`,
                 true,
@@ -6120,7 +6137,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
 
         updateLaunchProgress(
             86,
-            preferredLang === 'en' ? 'Launching browser window...' : '正在启动浏览器窗口...',
+            launchLanguage === 'en' ? 'Launching browser window...' : '正在启动浏览器窗口...',
             true,
             { step: 8, profileName: progressProfileName }
         );
@@ -6159,7 +6176,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
 
         updateLaunchProgress(
             94,
-            preferredLang === 'en' ? 'Applying runtime settings...' : '正在应用运行时设置...',
+            launchLanguage === 'en' ? 'Applying runtime settings...' : '正在应用运行时设置...',
             true,
             { step: 9, profileName: progressProfileName }
         );
@@ -6423,7 +6440,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
         launchingProfiles.delete(profileId);
         updateLaunchProgress(
             100,
-            preferredLang === 'en' ? 'Launch complete' : '启动完成',
+            launchLanguage === 'en' ? 'Launch complete' : '启动完成',
             true,
             { step: 10, profileName: progressProfileName }
         );

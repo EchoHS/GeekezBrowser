@@ -391,7 +391,9 @@ const enTranslations = {
 };
 
 // Global i18n Manager
-window.curLang = localStorage.getItem('geekez_lang') || 'cn';
+const systemLanguage = /^zh(?:[-_]|$)/i.test(String(navigator.language || '').trim()) ? 'cn' : 'en';
+const storedLanguage = localStorage.getItem('geekez_lang');
+window.curLang = storedLanguage === 'cn' || storedLanguage === 'en' ? storedLanguage : systemLanguage;
 
 window.t = function (key) {
     if ((window.uiStore?.lang || window.curLang) === 'cn' && window.zhCN && window.zhCN[key]) {

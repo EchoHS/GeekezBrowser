@@ -43,7 +43,7 @@ jobs:
             xray_asset: Xray-windows-arm64-v8a.zip
             build_cmd: npm run build && npx electron-builder --win nsis zip --arm64
           # Linux x64
-          - platform: ubuntu-latest
+          - platform: ubuntu-22.04
             os: linux
             arch: x64
             xray_asset: Xray-linux-64.zip
@@ -165,6 +165,17 @@ jobs:
           for file in dist/*.zip; do
             if [ -f "$file" ]; then
               mv "$file" "${file%.zip}-portable.zip"
+            fi
+          done
+
+      - name: Normalize Linux AppImage name
+        if: matrix.os == 'linux' && matrix.arch == 'x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in dist/*-x64.AppImage; do
+            if [ -f "$file" ]; then
+              mv "$file" "${file%-x64.AppImage}-x86_64.AppImage"
             fi
           done
 

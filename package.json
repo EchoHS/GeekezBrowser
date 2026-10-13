@@ -16,7 +16,7 @@
   "build": {
     "appId": "com.geekez.browser",
     "productName": "GeekEZ Browser",
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "directories": {
       "output": "dist"
     },
@@ -63,7 +63,7 @@
         }
       ],
       "icon": "resources/logo.ico",
-      "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -103,6 +103,9 @@
     "linux": {
       "target": "AppImage",
       "icon": "src/renderer/icon.png"
+    },
+    "toolsets": {
+      "appimage": "1.0.3"
     }
   },
   "dependencies": {

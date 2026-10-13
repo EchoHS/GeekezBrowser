@@ -84,7 +84,7 @@ function validateRecord(record, key) {
             if (!Array.isArray(settings[field]) || settings[field].some(item => !item || typeof item !== 'object' || Array.isArray(item))) throw invalid(field);
         }
         for (const [field, values] of Object.entries({
-            theme: ['geek', 'light', 'dark', 'tech-gray'], lang: ['cn', 'en'],
+            theme: ['geek', 'light', 'dark', 'tech-gray'], lang: ['auto', 'cn', 'en'],
             mode: ['single', 'balance', 'failover'], watermarkStyle: ['off', 'enhanced', 'banner'], closeBehavior: ['tray', 'quit']
         })) {
             if (settings[field] !== undefined && !values.includes(settings[field])) throw invalid(field);

@@ -76,7 +76,7 @@ function createProfileSync({ app, safeStorage, ipcMain, dialog, paths, helpers, 
                 version: 1, kind: 'settings', settings: portableSettings({
                     preProxies: [], subscriptions: [], mode: 'single', selectedId: null,
                     enableUaWebglModify: false, enableRemoteDebugging: false, enableCustomArgs: false, closeBehavior: 'tray',
-                    lang: 'cn', theme: 'geek', watermarkStyle: 'enhanced', ...settings
+                    lang: 'auto', theme: 'geek', watermarkStyle: 'enhanced', ...settings
                 }, defaults.passwords)
             };
             for (const profile of profiles) {

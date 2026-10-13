@@ -71,10 +71,10 @@ It is designed to solve multi-account association issues in cross-border e-comme
 
 ### Method 1: Download Installer (Recommended)
 Go to the [**Releases**](https://github.com/EchoHS/GeekezBrowser/releases) page and download the package for your platform:
-*   **Windows**: `GeekEZ Browser-{version}-win-x64.exe`
-*   **macOS (ARM64)**: `GeekEZ Browser-{version}-mac-arm64.dmg`
-*   **macOS (Intel)**: `GeekEZ Browser-{version}-mac-x64.dmg`
-*   **Linux**: `GeekEZ Browser-{version}-linux-x64.AppImage`
+*   **Windows**: `GeekEZ Browser-{version}-x64.exe` or `GeekEZ Browser-{version}-arm64.exe`
+*   **macOS (ARM64)**: `GeekEZ Browser-{version}-arm64.dmg`
+*   **macOS (Intel)**: `GeekEZ Browser-{version}-x64.dmg`
+*   **Linux**: `GeekEZ Browser-{version}-x86_64.AppImage` or `GeekEZ Browser-{version}-arm64.AppImage`
 
 ### Method 2: Run from Source
 
