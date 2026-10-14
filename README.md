@@ -18,8 +18,8 @@
 
 <table>
 <tr>
-<td width="180"><a href="https://www.swiftproxy.net/?code=XJXTWR010"><img src="https://browser.geekez.net/assets/swiftproxy-sponsor.png" alt="Swiftproxy" width="150"></a></td>
-<td>Thanks to <a href="https://www.swiftproxy.net/?code=XJXTWR010">Swiftproxy</a> for sponsoring this project! Swiftproxy provides 90M+ clean residential IPs across 220+ locations, supporting HTTP(S)/SOCKS5, IP rotation, Sticky Sessions, and precise geo-targeting for browser automation and multi-account management. Free testing is available. Register via <a href="https://www.swiftproxy.net/?code=XJXTWR010">this link</a> and use promo code <b>PROXY90</b> for an exclusive 10% discount!</td>
+<td width="180"><a href="https://www.rapidproxy.io/?code=6NW9VJ8GK"><img src="https://browser.geekez.net/assets/rapidproxy-sponsor.png" alt="RapidProxy" width="150"></a></td>
+<td>Thanks to <a href="https://www.rapidproxy.io/?code=6NW9VJ8GK">RapidProxy</a> for sponsoring this project! RapidProxy delivers 90M+ residential IPs across 200+ countries and regions, with smart rotation, precise geo-targeting, and high concurrency. Rotating residential proxies start at $0.55/GB with non-expiring traffic, while static residential IPs cost $5/IP/month. Supporting HTTP/HTTPS/SOCKS5, RapidProxy is ideal for web scraping, AI data collection, SEO monitoring, and e-commerce research. Use promo code <b>RAPID10</b> for 10% off and start your free trial.</td>
 </tr>
 </table>
 
