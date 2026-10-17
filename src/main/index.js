@@ -92,6 +92,7 @@ async function createSocksProxyAgent(proxyUrl) {
 
 import { generateXrayConfig, parseProxyLink, getProxyRemark } from './utils';
 import { generateFingerprint, getInjectScript } from './fingerprint';
+const { installWorkerFingerprint } = require('./worker-fingerprint');
 import guardBackground from './guard/background.js?raw';
 import guardPasswordContent from './guard/content-passwords.js?raw';
 import guardPopupHtml from './guard/popup.html?raw';
@@ -6180,6 +6181,8 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             true,
             { step: 9, profileName: progressProfileName }
         );
+
+        await installWorkerFingerprint(browser, profile.fingerprint, isGoogleAuthLikeUrl);
 
         let runtimeFingerprint = profile.fingerprint;
         setProfileRuntimeLanguageState(profileId, runtimeFingerprint);

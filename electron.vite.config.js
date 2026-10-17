@@ -26,7 +26,8 @@ export default defineConfig({
           'audio-noise': resolve(__dirname, 'src/main/audio-noise.js'),
           'canvas-noise': resolve(__dirname, 'src/main/canvas-noise.js'),
           'media-device-profile': resolve(__dirname, 'src/main/media-device-profile.js'),
-          'voice-profile': resolve(__dirname, 'src/main/voice-profile.js')
+          'voice-profile': resolve(__dirname, 'src/main/voice-profile.js'),
+          'worker-fingerprint': resolve(__dirname, 'src/main/worker-fingerprint.js')
         }
       }
     }
