@@ -430,7 +430,11 @@ function generateXrayConfig(mainProxyStr, localPort, preProxyConfig = null, prof
             const preOutbound = parseProxyLink(target.url, "proxy_pre");
             applyUtlsFingerprint(preOutbound, utlsFingerprint);
             outbounds.push(preOutbound);
-            mainOutbound.proxySettings = { tag: "proxy_pre" };
+            mainOutbound.streamSettings = mainOutbound.streamSettings || {};
+            mainOutbound.streamSettings.sockopt = {
+                ...mainOutbound.streamSettings.sockopt,
+                dialerProxy: "proxy_pre"
+            };
         } catch (e) { }
     }
 
