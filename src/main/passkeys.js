@@ -4,13 +4,9 @@ const CREDENTIAL_FIELDS = ['credentialId', 'isResidentCredential', 'rpId', 'priv
 const AUTHENTICATOR_OPTIONS = {
     protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'internal',
     hasResidentKey: true, hasUserVerification: true, hasLargeBlob: true,
-    automaticPresenceSimulation: false, isUserVerified: false,
+    automaticPresenceSimulation: true, isUserVerified: true,
     defaultBackupEligibility: true, defaultBackupState: false
 };
-
-function missingAuthenticator(failure) {
-    return /Virtual Authenticator Environment has not been enabled|[Aa]uthenticator.*(?:not found|does not exist)|Invalid authenticatorId/.test(failure.message);
-}
 
 function invalidPasskey() {
     return new Error('Passkey 数据无效，未覆盖已有凭据');
@@ -58,7 +54,7 @@ function normalizePasskeys(credentials) {
 
 function normalizePasskeyStore(value) {
     if (!value || value.version !== 1 || typeof value.enabled !== 'boolean') throw invalidPasskey();
-    return { version: 1, enabled: value.enabled, credentials: normalizePasskeys(value.credentials) };
+    return { version: 1, enabled: true, credentials: normalizePasskeys(value.credentials) };
 }
 
 function publicCredential(entry) {
@@ -76,12 +72,11 @@ function eligiblePage(page) {
     } catch { return false; }
 }
 
-async function createPasskeyManager({ browser, readStore, writeStore, confirm, onChange = () => {} }) {
+async function createPasskeyManager({ browser, readStore, writeStore, onChange = () => {} }) {
     let store = normalizePasskeyStore(await readStore());
     let queue = Promise.resolve();
     let error = '';
     let closing = false;
-    let confirming = false;
     let pendingStore = null;
     const states = new Map();
     const attaching = new Map();
@@ -99,18 +94,14 @@ async function createPasskeyManager({ browser, readStore, writeStore, confirm, o
         pendingStore = null;
         onChange();
     };
-    const revoke = async state => {
+    const keepAuthenticatorActive = async state => {
         clearTimeout(state.timer);
         state.timer = null;
         state.authorizedUntil = 0;
         if (state.page.isClosed()) return;
-        try {
-            await state.session.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId: state.id, enabled: false });
-        } catch (failure) {
-            if (!missingAuthenticator(failure)) throw failure;
-            await initializeAuthenticator(state);
-        }
-        await state.session.send('WebAuthn.setUserVerified', { authenticatorId: state.id, isUserVerified: false });
+        if (!state.id) return;
+        await state.session.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId: state.id, enabled: true });
+        await state.session.send('WebAuthn.setUserVerified', { authenticatorId: state.id, isUserVerified: true });
     };
     const hydrate = async (state, credentials = store.credentials) => {
         state.hydrating = true;
@@ -120,21 +111,21 @@ async function createPasskeyManager({ browser, readStore, writeStore, confirm, o
         } finally { state.hydrating = false; }
     };
     const initializeAuthenticator = async state => {
+        // CDP WebAuthn with UI disabled suppresses platform/iCloud discovery;
+        // the only authenticator exposed to the page is this profile-local one.
         await state.session.send('WebAuthn.enable', { enableUI: false });
         const result = await state.session.send('WebAuthn.addVirtualAuthenticator', { options: AUTHENTICATOR_OPTIONS });
         state.id = result.authenticatorId;
         await hydrate(state);
     };
     const fail = async () => {
-        error = 'Passkey 保存或认证器更新失败，已暂停授权；请关闭环境后检查数据并重新启动';
-        for (const state of states.values()) await revoke(state).catch(() => {});
+        error = 'Passkey 保存或认证器更新失败，已暂停环境接管；请关闭环境后检查数据并重新启动';
+        for (const state of states.values()) await keepAuthenticatorActive(state).catch(() => {});
     };
     const handleCredential = (state, kind, event) => {
         if (state.hydrating || closing || error || event.authenticatorId !== state.id) return;
-        const revoked = revoke(state).catch(() => {});
         void task(async () => {
-            await revoked;
-            if (closing || !store.enabled) return;
+            if (closing) return;
             let credentials = store.credentials;
             if (kind === 'deleted') {
                 credentials = credentials.filter(entry => entry.credentialId !== event.credentialId);
@@ -145,16 +136,14 @@ async function createPasskeyManager({ browser, readStore, writeStore, confirm, o
                 if (current) incoming.signCount = Math.max(current.signCount, incoming.signCount);
                 credentials = credentials.filter(entry => entry.credentialId !== incoming.credentialId).concat(incoming);
             }
-            await revoke(state);
             await persist({ ...store, credentials });
             for (const other of states.values()) {
-                await revoke(other);
                 if (!other.page.isClosed()) await hydrate(other);
             }
         }).catch(fail);
     };
     const attach = async page => {
-        if (closing || !store.enabled || states.has(page) || page.isClosed() || /^(chrome-extension|devtools):/.test(page.url())) return;
+        if (closing || states.has(page) || page.isClosed() || /^(chrome-extension|devtools):/.test(page.url())) return;
         if (attaching.has(page)) return attaching.get(page);
         const pending = (async () => {
             const session = await page.createCDPSession();
@@ -168,7 +157,7 @@ async function createPasskeyManager({ browser, readStore, writeStore, confirm, o
                 await initializeAuthenticator(state);
                 states.set(page, state);
                 state.onNavigation = frame => {
-                    if (frame === page.mainFrame()) void revoke(state).catch(() => {});
+                    if (frame === page.mainFrame()) void keepAuthenticatorActive(state).catch(() => {});
                 };
                 state.onClose = () => { clearTimeout(state.timer); states.delete(page); };
                 page.on('framenavigated', state.onNavigation);
@@ -225,71 +214,20 @@ async function createPasskeyManager({ browser, readStore, writeStore, confirm, o
         summary: () => task(summary),
         setEnabled: enabled => task(async () => {
             if (typeof enabled !== 'boolean' || closing || error) throw new Error('Passkey 状态不可修改');
-            if (enabled === store.enabled) return summary();
-            if (enabled) {
-                store.enabled = true;
-                try { await initialize(); await persist(store); }
-                catch (failure) { await fail(); throw failure; }
-            } else {
-                for (const state of states.values()) await revoke(state);
-                for (const state of states.values()) {
-                    state.page.off('framenavigated', state.onNavigation);
-                    state.page.off('close', state.onClose);
-                    await state.session.send('WebAuthn.disable');
-                    await state.session.detach();
-                }
-                states.clear();
-                await persist({ ...store, enabled: false });
+            if (enabled !== true) throw new Error('环境级 Passkey 接管不可关闭');
+            if (!store.enabled) {
+                store = { ...store, enabled: true };
+                await persist(store);
             }
+            await initialize();
             return summary();
         }),
-        authorize: async (targetId, credentialId, mode = 'use') => {
-            if (mode !== 'register' && mode !== 'use') throw new Error('无效的 Passkey 操作');
-            if (typeof targetId !== 'string' || !targetId || (credentialId !== undefined && typeof credentialId !== 'string')) throw new Error('无效的 Passkey 授权');
-            if (confirming) throw new Error('已有 Passkey 授权等待确认');
-            const pages = await browser.pages();
-            const ids = await Promise.all(pages.map(pageId));
-            const page = pages[ids.indexOf(targetId)];
-            if (!page || !eligiblePage(page) || closing || !store.enabled || error) throw new Error('请选择当前环境的安全网页');
-            const origin = new URL(page.url()).origin;
-            const hostname = new URL(origin).hostname;
-            const credential = credentialId ? store.credentials.find(entry => entry.credentialId === credentialId) : null;
-            if (credentialId && (!credential || !(hostname === credential.rpId || hostname.endsWith('.' + credential.rpId)))) {
-                throw new Error('该 Passkey 不属于所选网站');
-            }
-            if (confirming) throw new Error('已有 Passkey 授权等待确认');
-            confirming = true;
-            const requestedAt = Date.now();
-            let accepted;
-            try { accepted = await confirm(origin, credential ? publicCredential(credential) : null, mode); }
-            finally { confirming = false; }
-            if (!accepted) throw new Error('已取消 Passkey 授权');
-            return task(async () => {
-                if (closing || error || !store.enabled || Date.now() - requestedAt > 60000 || page.isClosed() || new URL(page.url()).origin !== origin) throw new Error('授权已过期或网页已变化，请重新授权');
-                await attach(page);
-                for (const state of states.values()) await revoke(state);
-                const state = states.get(page);
-                const latest = credentialId ? store.credentials.find(entry => entry.credentialId === credentialId) : null;
-                if (credentialId && !latest) throw new Error('Passkey 已被删除，请重新选择');
-                const allowed = latest
-                    ? [latest]
-                    : store.credentials.filter(entry => hostname === entry.rpId || hostname.endsWith('.' + entry.rpId));
-                if (mode === 'use' && !allowed.length) throw new Error('当前网站没有可用的 Passkey');
-                await hydrate(state, allowed);
-                await state.session.send('WebAuthn.setUserVerified', { authenticatorId: state.id, isUserVerified: true });
-                state.authorizedUntil = Date.now() + 60000;
-                state.timer = setTimeout(() => { void task(() => revoke(state)).catch(fail); }, 60000);
-                state.timer.unref?.();
-                await state.session.send('WebAuthn.setAutomaticPresenceSimulation', { authenticatorId: state.id, enabled: true });
-                return summary();
-            });
-        },
-        revoke: () => task(async () => { for (const state of states.values()) await revoke(state); return summary(); }),
+        authorize: () => task(summary),
+        revoke: () => task(summary),
         remove: credentialId => task(async () => {
             if (closing || error) throw new Error('Passkey 不可修改');
             if (!store.credentials.some(entry => entry.credentialId === credentialId)) throw new Error('Passkey 不存在');
             try {
-                for (const state of states.values()) await revoke(state);
                 await persist({ ...store, credentials: store.credentials.filter(entry => entry.credentialId !== credentialId) });
                 for (const state of states.values()) await hydrate(state);
                 return summary();
@@ -299,14 +237,13 @@ async function createPasskeyManager({ browser, readStore, writeStore, confirm, o
         close: async () => {
             browser.off('targetcreated', handleTarget);
             browser.off('targetchanged', handleChangedTarget);
-            for (const state of states.values()) await revoke(state).catch(() => {});
             await flush();
             closing = true;
             for (const state of states.values()) {
                 clearTimeout(state.timer);
                 state.page.off('framenavigated', state.onNavigation);
                 state.page.off('close', state.onClose);
-                await revoke(state).catch(() => {});
+                await keepAuthenticatorActive(state).catch(() => {});
                 await state.session.send('WebAuthn.disable').catch(() => {});
                 await state.session.detach().catch(() => {});
             }

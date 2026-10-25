@@ -117,19 +117,9 @@
         <div><h2 id="passkeyTitle">环境级 Passkey</h2><p id="passkeySummary">正在读取状态...</p></div>
         <button id="passkeyReload" type="button" class="icon-button" title="重新加载 Passkey" aria-label="重新加载 Passkey">↻</button>
       </div>
-      <label class="toggle passkey-toggle"><input id="passkeyEnabled" type="checkbox">启用 Passkey</label>
       <p id="passkeyStatus" class="status" role="status" hidden></p>
-      <div id="passkeyControls" hidden>
-        <label class="field passkey-select" for="passkeyPage"><span class="field-label">授权网页</span><select id="passkeyPage"></select></label>
-        <label class="field" for="passkeyCredential"><span class="field-label">使用凭据</span><select id="passkeyCredential"></select></label>
-        <div class="passkey-actions">
-          <button id="passkeyUse" type="button" class="primary">授权使用</button>
-          <button id="passkeyRegister" type="button">授权注册</button>
-          <button id="passkeyRevoke" type="button">撤销授权</button>
-        </div>
-      </div>
       <div id="passkeyCredentials" class="passkey-credentials"></div>
-      <p class="passkey-help">先授权，再回到网页创建或登录；授权最多持续 60 秒，完成一次操作后撤销。私钥不进入系统钥匙串。</p>
+      <p class="passkey-help">当前环境已自动接管 HTTPS 网页的 Passkey，注册和登录直接使用本环境凭据，不调用系统 Passkey。私钥不进入系统钥匙串。</p>
       <p class="passkey-help">切换终端前请关闭环境并上传最新配置，另一终端下载后再启动。不要同时使用同一环境的 Passkey。</p>
     </section>
   <form id="editor" hidden>

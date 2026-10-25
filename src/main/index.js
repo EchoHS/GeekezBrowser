@@ -6413,20 +6413,7 @@ const launchProfileHandler = async (event, profileId, watermarkStyle, preferredL
             browser,
             readStore: () => readPasskeyStore(profileId),
             writeStore: store => writePasskeyStore(profileId, store),
-            onChange: () => configSync?.schedule(),
-            confirm: async (origin, credential, mode) => {
-                const { response } = await dialog.showMessageBox({
-                    type: 'warning', buttons: ['取消', '允许本次操作'], defaultId: 0, cancelId: 0, noLink: true,
-                    title: 'GeekEZ Guard · Passkey 授权',
-                    message: mode === 'register'
-                        ? `允许环境“${profile.name}”为 ${origin} 注册新的 Passkey？`
-                        : credential
-                            ? `允许环境“${profile.name}”使用 ${origin} 的 Passkey（${credential.userDisplayName || credential.userName || credential.rpId}）？`
-                            : `允许环境“${profile.name}”使用 ${origin} 的可发现 Passkey？`,
-                    detail: '本次授权最多持续 60 秒，完成一次操作后撤销。软件认证不是 Touch ID / Windows Hello；私钥只使用当前环境的数据。'
-                });
-                return response === 1;
-            }
+            onChange: () => configSync?.schedule()
         });
 
         activeProcesses[profileId] = {
