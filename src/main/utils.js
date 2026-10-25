@@ -26,6 +26,94 @@ function getProxyRemark(link) {
     return '';
 }
 
+function normalizeVmessSecurity(value) {
+    const security = String(value || 'auto').toLowerCase();
+    return security === 'none' || security === 'zero' ? 'auto' : security;
+}
+
+function firstQueryValue(params, ...keys) {
+    for (const key of keys) {
+        const value = params.get(key);
+        if (value !== null && value !== '') return value;
+    }
+    return '';
+}
+
+function decodeUriUserInfo(value) {
+    try { return decodeURIComponent(value || ''); } catch { throw new Error('Invalid Hysteria 2 user info'); }
+}
+
+function parseHysteria2Link(link, tag) {
+    const urlObj = new URL(link);
+    const params = urlObj.searchParams;
+    const username = decodeUriUserInfo(urlObj.username);
+    const password = decodeUriUserInfo(urlObj.password);
+    const auth = password ? `${username}:${password}` : (username || firstQueryValue(params, 'auth'));
+    const host = urlObj.hostname;
+    const port = parseInt(urlObj.port || '443', 10);
+    if (!host || !Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid Hysteria 2 server address');
+
+    const obfs = firstQueryValue(params, 'obfs').toLowerCase();
+    const obfsPassword = firstQueryValue(params, 'obfs-password', 'obfsPassword');
+    if (obfs && obfs !== 'none' && obfs !== 'salamander') throw new Error(`Unsupported Hysteria 2 obfuscation: ${obfs}`);
+    if (obfs === 'salamander' && !obfsPassword) throw new Error('Hysteria 2 Salamander requires obfs-password');
+
+    const tlsSettings = { serverName: firstQueryValue(params, 'sni') || host };
+    const alpn = firstQueryValue(params, 'alpn');
+    if (alpn) tlsSettings.alpn = alpn.split(',').map(value => value.trim()).filter(Boolean);
+    const pinSHA256 = firstQueryValue(params, 'pinSHA256', 'pin-sha256', 'pin');
+    if (pinSHA256) tlsSettings.pinnedPeerCertSha256 = pinSHA256;
+    const insecure = ['1', 'true', 'yes'].includes(firstQueryValue(params, 'insecure', 'allowInsecure').toLowerCase());
+    if (insecure && !pinSHA256) {
+        throw new Error('Hysteria 2 insecure TLS requires pinSHA256 with Xray v26.10.21');
+    }
+
+    const hysteriaSettings = { version: 2 };
+    if (auth) hysteriaSettings.auth = auth;
+    const udpIdleTimeout = firstQueryValue(params, 'udpIdleTimeout', 'udp-idle-timeout');
+    if (udpIdleTimeout) {
+        hysteriaSettings.udpIdleTimeout = Number.parseInt(udpIdleTimeout, 10);
+        if (!Number.isInteger(hysteriaSettings.udpIdleTimeout)) throw new Error('Invalid Hysteria 2 udpIdleTimeout');
+    }
+
+    const quicParams = {};
+    const congestion = firstQueryValue(params, 'congestion');
+    const up = firstQueryValue(params, 'up');
+    const down = firstQueryValue(params, 'down');
+    if (congestion) quicParams.congestion = congestion;
+    if (up) quicParams.brutalUp = up;
+    if (down) quicParams.brutalDown = down;
+
+    const serverPorts = firstQueryValue(params, 'mport', 'serverPorts', 'server-ports');
+    const hopInterval = firstQueryValue(params, 'hopInterval', 'hop-interval');
+    if (serverPorts) {
+        quicParams.udpHop = { ports: serverPorts };
+        if (hopInterval) {
+            quicParams.udpHop.interval = Number.parseInt(hopInterval, 10);
+            if (!Number.isInteger(quicParams.udpHop.interval)) throw new Error('Invalid Hysteria 2 hop interval');
+        }
+    }
+
+    const finalmask = {};
+    if (obfs === 'salamander') finalmask.udp = [{ type: 'salamander', settings: { password: obfsPassword } }];
+    if (Object.keys(quicParams).length) finalmask.quicParams = quicParams;
+
+    const streamSettings = {
+        network: 'hysteria',
+        security: 'tls',
+        tlsSettings,
+        hysteriaSettings
+    };
+    if (Object.keys(finalmask).length) streamSettings.finalmask = finalmask;
+
+    return {
+        tag,
+        protocol: 'hysteria',
+        settings: { version: 2, address: host, port },
+        streamSettings
+    };
+}
+
 function parseProxyLink(link, tag) {
     let outbound = {
         tag: tag
@@ -42,7 +130,7 @@ function parseProxyLink(link, tag) {
             outbound.settings = {
                 vnext: [{
                     address: vmess.add, port: parseInt(vmess.port),
-                    users: [{ id: vmess.id, alterId: parseInt(vmess.aid || 0), security: vmess.scy || "auto" }]
+                    users: [{ id: vmess.id, alterId: parseInt(vmess.aid || 0), security: normalizeVmessSecurity(vmess.scy) }]
                 }]
             };
 
@@ -50,7 +138,7 @@ function parseProxyLink(link, tag) {
             outbound.streamSettings = {
                 network: net,
                 security: vmess.tls || "none",
-                wsSettings: net === "ws" ? { path: vmess.path, headers: { Host: vmess.host } } : undefined,
+                wsSettings: net === "ws" ? { path: vmess.path, host: vmess.host } : undefined,
                 grpcSettings: net === "grpc" ? { serviceName: vmess.path || vmess.serviceName } : undefined,
                 httpSettings: net === "h2" ? { path: vmess.path, host: vmess.host ? vmess.host.split(',') : [] } : undefined,
                 kcpSettings: net === "kcp" ? { header: { type: vmess.type || "none" }, seed: vmess.path } : undefined,
@@ -64,6 +152,9 @@ function parseProxyLink(link, tag) {
                     alpn: vmess.alpn ? vmess.alpn.split(',') : undefined
                 };
             }
+        }
+        else if (/^(?:hy2|hysteria2):\/\//i.test(link)) {
+            outbound = parseHysteria2Link(link, tag);
         }
         else if (link.startsWith('vless://')) {
             const urlObj = new URL(link);
@@ -87,7 +178,7 @@ function parseProxyLink(link, tag) {
             outbound.streamSettings = { network: type, security: security };
 
             if (type === 'ws') {
-                outbound.streamSettings.wsSettings = { path: params.get("path"), headers: { Host: params.get("host") } };
+                outbound.streamSettings.wsSettings = { path: params.get("path"), host: params.get("host") || "" };
             } else if (type === 'grpc') {
                 outbound.streamSettings.grpcSettings = { serviceName: params.get("serviceName") };
             } else if (type === 'xhttp' || type === 'splithttp') {
@@ -131,7 +222,7 @@ function parseProxyLink(link, tag) {
                 network: type,
                 security: params.get("security") || "tls",
                 tlsSettings: { serverName: params.get("sni") || urlObj.hostname, fingerprint: "chrome" },
-                wsSettings: type === 'ws' ? { path: params.get("path"), headers: { Host: params.get("host") } } : undefined,
+                wsSettings: type === 'ws' ? { path: params.get("path"), host: params.get("host") || "" } : undefined,
                 grpcSettings: type === 'grpc' ? { serviceName: params.get("serviceName") } : undefined
             };
         }
@@ -207,6 +298,10 @@ function parseProxyLink(link, tag) {
             }
 
             outbound.protocol = "shadowsocks";
+
+            if (['none', 'plain'].includes(String(method || '').toLowerCase())) {
+                throw new Error(`Unsupported Shadowsocks cipher method: ${method}`);
+            }
             
             // Minimalist settings matching v2rayN format
             outbound.settings = {
@@ -381,7 +476,7 @@ function parseProxyLink(link, tag) {
             outbound.protocol = "http";
             outbound.settings = { servers: [{ address: urlObj.hostname, port: parseInt(urlObj.port), users: urlObj.username ? [{ user: urlObj.username, pass: urlObj.password }] : [] }] };
         } else { throw new Error("Unsupported protocol"); }
-    } catch (e) { console.error("Parse Proxy Error:", link, e); throw e; }
+    } catch (e) { console.error("Parse Proxy Error:", e?.message || e); throw e; }
     return outbound;
 }
 

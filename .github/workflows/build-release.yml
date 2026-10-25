@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  XRAY_FALLBACK_VERSION: 'v26.3.27'
+  XRAY_FALLBACK_VERSION: 'v26.10.21'
   ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
 
 jobs:

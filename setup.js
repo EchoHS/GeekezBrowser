@@ -201,8 +201,8 @@ async function main() {
             xrayVersion = await getLatestXrayVersion(!isGlobal);
             console.log(`📦 Latest version: ${xrayVersion}`);
         } catch (e) {
-            console.log('⚠️  Failed to get latest version, using fallback: v26.3.27');
-            xrayVersion = 'v26.3.27';
+            console.log('⚠️  Failed to get latest version, using fallback: v26.10.21');
+            xrayVersion = 'v26.10.21';
         }
 
         const baseUrl = `https://github.com/XTLS/Xray-core/releases/download/${xrayVersion}/${xrayAsset}`;

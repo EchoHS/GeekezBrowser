@@ -58,9 +58,16 @@ function readProxySearchParams(link) {
     }
 }
 
+function hasHysteria2CertificatePin(link, params) {
+    const scheme = String(link || '').trim().split(':', 1)[0].toLowerCase();
+    if (scheme !== 'hy2' && scheme !== 'hysteria2') return false;
+    return Boolean(params.get('pinSHA256') || params.get('pin-sha256') || params.get('pin'));
+}
+
 export function hasUnsupportedXrayInsecureParam(link) {
     const params = readProxySearchParams(link);
     if (!params) return false;
+    if (hasHysteria2CertificatePin(link, params)) return false;
 
     for (const [key, value] of params.entries()) {
         const normalizedKey = String(key || '').trim().toLowerCase();
