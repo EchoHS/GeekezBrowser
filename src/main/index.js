@@ -4513,7 +4513,7 @@ async function checkXrayUpdateAvailable() {
 
         const remoteVersion = release.tag_name;
         const localVersion = await getLocalXrayVersion();
-        if (remoteVersion === localVersion) return { update: false };
+        if (compareVersions(remoteVersion, localVersion) <= 0) return { update: false };
 
         const assetName = xrayRelease.resolveXrayAssetName({
             platform: os.platform(),
@@ -4535,6 +4535,7 @@ async function checkXrayUpdateAvailable() {
 ipcMain.handle('check-xray-update', checkXrayUpdateAvailable);
 ipcMain.handle('download-xray-update', async (e, url) => {
     const exeName = process.platform === 'win32' ? 'xray.exe' : 'xray';
+    const expectedVersion = String(url || '').match(/\/download\/(v?\d+\.\d+\.\d+)\//i)?.[1] || '';
     const tempBase = os.tmpdir();
     const updateId = `xray_update_${Date.now()}`;
     const tempDir = path.join(tempBase, updateId);
@@ -4542,9 +4543,6 @@ ipcMain.handle('download-xray-update', async (e, url) => {
     try {
         fs.mkdirSync(tempDir, { recursive: true });
         await downloadFile(url, zipPath);
-        if (process.platform === 'win32') await new Promise((resolve) => exec('taskkill /F /IM xray.exe', () => resolve()));
-        activeProcesses = {};
-        await new Promise(r => setTimeout(r, 3000));
         const extractDir = path.join(tempDir, 'extracted');
         fs.mkdirSync(extractDir, { recursive: true });
         await extractZip(zipPath, extractDir);
@@ -4586,22 +4584,48 @@ ipcMain.handle('download-xray-update', async (e, url) => {
             throw new Error('Xray binary not found in package');
         }
 
+        const extractedVersion = await getXrayVersion(xrayBinary);
+        if (extractedVersion === 'v0.0.0') {
+            throw new Error('Downloaded Xray binary version could not be detected');
+        }
+        if (expectedVersion && compareVersions(extractedVersion, expectedVersion) !== 0) {
+            throw new Error(`Downloaded Xray version mismatch: expected ${expectedVersion}, got ${extractedVersion}`);
+        }
+
+        if (process.platform === 'win32') await new Promise((resolve) => exec('taskkill /F /IM xray.exe', () => resolve()));
+        activeProcesses = {};
+        await new Promise(r => setTimeout(r, 3000));
+
         // Windows文件锁规避：先重命名旧文件，再复制新文件
         const oldPath = BIN_PATH + '.old';
+        let oldBinaryMoved = false;
         if (fs.existsSync(BIN_PATH)) {
             try {
                 if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
             } catch (e) { }
             fs.renameSync(BIN_PATH, oldPath);
+            oldBinaryMoved = true;
         }
-        fs.ensureDirSync(BIN_DIR);
-        fs.copyFileSync(xrayBinary, BIN_PATH);
-        if (process.platform !== 'win32') fs.chmodSync(BIN_PATH, '755');
-        // 删除旧文件
         try {
-            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-        } catch (e) { }
-        if (process.platform !== 'win32') fs.chmodSync(BIN_PATH, '755');
+            fs.ensureDirSync(BIN_DIR);
+            fs.copyFileSync(xrayBinary, BIN_PATH);
+            if (process.platform !== 'win32') fs.chmodSync(BIN_PATH, '755');
+            const installedVersion = await getXrayVersion(BIN_PATH);
+            if (installedVersion !== extractedVersion) {
+                throw new Error(`Installed Xray version mismatch: expected ${extractedVersion}, got ${installedVersion}`);
+            }
+            try {
+                if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+            } catch (e) { }
+        } catch (error) {
+            try {
+                if (fs.existsSync(BIN_PATH)) fs.unlinkSync(BIN_PATH);
+            } catch (cleanupError) { }
+            if (oldBinaryMoved && fs.existsSync(oldPath)) {
+                fs.renameSync(oldPath, BIN_PATH);
+            }
+            throw error;
+        }
         // 清理临时目录（即使失败也不影响更新）
         try {
             fs.rmSync(tempDir, { recursive: true, force: true });
@@ -6586,19 +6610,44 @@ app.on('window-all-closed', () => {
 });
 // Helpers (Same)
 function fetchJson(url) { return new Promise((resolve, reject) => { const req = https.get(url, { headers: { 'User-Agent': 'GeekEZ-Browser' } }, (res) => { let data = ''; res.on('data', c => data += c); res.on('end', () => { try { resolve(JSON.parse(data)); } catch (e) { reject(e); } }); }); req.on('error', reject); }); }
-function getLocalXrayVersion() { return new Promise((resolve) => { if (!fs.existsSync(BIN_PATH)) return resolve('v0.0.0'); try { const proc = spawn(BIN_PATH, ['-version']); let output = ''; proc.stdout.on('data', d => output += d.toString()); proc.on('close', () => { const match = output.match(/Xray\s+v?(\d+\.\d+\.\d+)/i); resolve(match ? (match[1].startsWith('v') ? match[1] : 'v' + match[1]) : 'v0.0.0'); }); proc.on('error', () => resolve('v0.0.0')); } catch (e) { resolve('v0.0.0'); } }); }
-function compareVersions(v1, v2) { const p1 = v1.split('.').map(Number); const p2 = v2.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((p1[i] || 0) > (p2[i] || 0)) return 1; if ((p1[i] || 0) < (p2[i] || 0)) return -1; } return 0; }
+function getXrayVersion(binaryPath = BIN_PATH) {
+    return new Promise((resolve) => {
+        if (!binaryPath || !fs.existsSync(binaryPath)) return resolve('v0.0.0');
+        try {
+            const processRef = spawn(binaryPath, ['-version'], { windowsHide: true });
+            let output = '';
+            processRef.stdout.on('data', data => output += data.toString());
+            processRef.stderr.on('data', data => output += data.toString());
+            processRef.on('close', () => {
+                const match = output.match(/Xray\s+v?(\d+\.\d+\.\d+)/i);
+                resolve(match ? `v${match[1]}` : 'v0.0.0');
+            });
+            processRef.on('error', () => resolve('v0.0.0'));
+        } catch (e) {
+            resolve('v0.0.0');
+        }
+    });
+}
+function getLocalXrayVersion() { return getXrayVersion(BIN_PATH); }
+function compareVersions(v1, v2) { const p1 = String(v1 || '').replace(/^v/i, '').split('.').map(Number); const p2 = String(v2 || '').replace(/^v/i, '').split('.').map(Number); for (let i = 0; i < 3; i++) { if ((p1[i] || 0) > (p2[i] || 0)) return 1; if ((p1[i] || 0) < (p2[i] || 0)) return -1; } return 0; }
 function downloadFile(url, dest, onProgress) {
     return new Promise((resolve, reject) => {
-        const file = fs.createWriteStream(dest);
-        https.get(url, (response) => {
+        const request = (requestUrl) => https.get(requestUrl, (response) => {
             if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-                downloadFile(response.headers.location, dest, onProgress).then(resolve).catch(reject);
+                response.resume();
+                request(response.headers.location);
+                return;
+            }
+
+            if (response.statusCode < 200 || response.statusCode >= 300) {
+                response.resume();
+                reject(new Error(`Failed to download: HTTP ${response.statusCode}`));
                 return;
             }
 
             const total = Number(response.headers['content-length'] || 0);
             let downloaded = 0;
+            const file = fs.createWriteStream(dest);
             if (typeof onProgress === 'function' && total > 0) {
                 onProgress(0);
             }
@@ -6610,14 +6659,20 @@ function downloadFile(url, dest, onProgress) {
                 }
             });
 
+            response.on('error', error => file.destroy(error));
             response.pipe(file);
+            file.on('error', error => {
+                try { fs.unlinkSync(dest); } catch (e) { }
+                reject(error);
+            });
             file.on('finish', () => {
                 try { file.close(resolve); } catch (e) { resolve(); }
             });
-        }).on('error', (err) => {
-            fs.unlink(dest, () => { });
-            reject(err);
+        }).on('error', (error) => {
+            try { fs.unlinkSync(dest); } catch (e) { }
+            reject(error);
         });
+        request(url);
     });
 }
 function extractZip(zipPath, destDir) {
