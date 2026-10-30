@@ -520,13 +520,17 @@ function generateXrayConfig(mainProxyStr, localPort, preProxyConfig = null, prof
     applyUtlsFingerprint(mainOutbound, utlsFingerprint);
 
     if (preProxyConfig && preProxyConfig.preProxies && preProxyConfig.preProxies.length > 0) {
-        try {
-            const target = preProxyConfig.preProxies[0];
-            const preOutbound = parseProxyLink(target.url, "proxy_pre");
-            applyUtlsFingerprint(preOutbound, utlsFingerprint);
-            outbounds.push(preOutbound);
-            mainOutbound.proxySettings = { tag: "proxy_pre" };
-        } catch (e) { }
+        const target = preProxyConfig.preProxies[0];
+        const preOutbound = parseProxyLink(target.url, "proxy_pre");
+        applyUtlsFingerprint(preOutbound, utlsFingerprint);
+        outbounds.push(preOutbound);
+        // Xray 26.10.29 removed outbound.proxySettings. The dialer
+        // proxy is now configured through streamSettings.sockopt.
+        mainOutbound.streamSettings = mainOutbound.streamSettings || {};
+        mainOutbound.streamSettings.sockopt = {
+            ...(mainOutbound.streamSettings.sockopt || {}),
+            dialerProxy: "proxy_pre"
+        };
     }
 
     outbounds.push(mainOutbound);

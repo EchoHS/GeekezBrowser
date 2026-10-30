@@ -185,6 +185,7 @@ const EXTENSION_STORE_CATALOG = [
 
 let activeProcesses = {};
 let launchingProfiles = new Set();
+let xrayUpdateInProgress = false;
 const profileResourceWrites = new Set();
 let profileApiQueue = Promise.resolve();
 let configSync = null;
@@ -4534,6 +4535,8 @@ async function checkXrayUpdateAvailable() {
 }
 ipcMain.handle('check-xray-update', checkXrayUpdateAvailable);
 ipcMain.handle('download-xray-update', async (e, url) => {
+    if (xrayUpdateInProgress) return false;
+    xrayUpdateInProgress = true;
     const exeName = process.platform === 'win32' ? 'xray.exe' : 'xray';
     const expectedVersion = String(url || '').match(/\/download\/(v?\d+\.\d+\.\d+)\//i)?.[1] || '';
     const tempBase = os.tmpdir();
@@ -4592,9 +4595,13 @@ ipcMain.handle('download-xray-update', async (e, url) => {
             throw new Error(`Downloaded Xray version mismatch: expected ${expectedVersion}, got ${extractedVersion}`);
         }
 
-        if (process.platform === 'win32') await new Promise((resolve) => exec('taskkill /F /IM xray.exe', () => resolve()));
-        activeProcesses = {};
-        await new Promise(r => setTimeout(r, 3000));
+        // Stop environments before replacing Xray. Clearing activeProcesses
+        // without closing Puppeteer leaves Chrome processes alive and their
+        // browser_data SingletonLock files survive the next app restart.
+        if (launchingProfiles.size > 0) {
+            throw new Error('Please wait for profile startup to finish before updating Xray');
+        }
+        await stopAllRunningProfilesFromTray();
 
         // Windows文件锁规避：先重命名旧文件，再复制新文件
         const oldPath = BIN_PATH + '.old';
@@ -4639,6 +4646,8 @@ ipcMain.handle('download-xray-update', async (e, url) => {
             if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
         } catch (err) { }
         return false;
+    } finally {
+        xrayUpdateInProgress = false;
     }
 });
 ipcMain.handle('get-running-ids', () => Object.keys(activeProcesses));
@@ -5638,6 +5647,9 @@ ipcMain.handle('export-data', async (e, type) => {
 
 // --- 核心启动逻辑 ---
 const launchProfileHandler = async (event, profileId, watermarkStyle, preferredLang, launchOptions = {}) => {
+    if (xrayUpdateInProgress) {
+        throw profileResourceError('Xray core is being updated; retry launching shortly', 409);
+    }
     if (profileResourceWrites.has(profileId)) {
         throw profileResourceError('Profile data is being updated; retry launching shortly', 409);
     }
