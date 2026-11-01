@@ -19,6 +19,7 @@ class WebDavSync {
         this.state = { deviceId: uuid(), bases: {}, lastSync: null };
         this.config = { url: '', folder: 'GeekEZ-Sync', username: '', automatic: false, remember: false };
         this.credentials = null;
+        this.secureStorageAvailable = false;
         this.status = { phase: 'idle', error: '', detail: '', conflicts: 0, deferred: 0 };
         this.plan = null;
         this.busy = false;
@@ -26,17 +27,25 @@ class WebDavSync {
     }
 
     canRemember() {
-        return Boolean(this.safeStorage?.isEncryptionAvailable() && this.safeStorage.getSelectedStorageBackend?.() !== 'basic_text');
+        return this.secureStorageAvailable;
     }
 
     async init() {
+        try {
+            this.secureStorageAvailable = Boolean(
+                await this.safeStorage?.isAsyncEncryptionAvailable?.() &&
+                this.safeStorage.getSelectedStorageBackend?.() !== 'basic_text'
+            );
+        } catch {
+            this.secureStorageAvailable = false;
+        }
         await fs.ensureDir(this.directory);
         const file = path.join(this.directory, 'connection.json');
         if (await fs.pathExists(file)) {
             const stored = await fs.readJson(file);
             this.config = { ...this.config, ...stored.config };
             if (stored.credentials && this.canRemember()) {
-                try { this.credentials = JSON.parse(this.safeStorage.decryptString(Buffer.from(stored.credentials, 'base64'))); }
+                try { this.credentials = JSON.parse(await this.safeStorage.decryptStringAsync(Buffer.from(stored.credentials, 'base64'))); }
                 catch { this.status.error = 'syncUnlockRequired'; }
             }
         }
@@ -88,7 +97,7 @@ class WebDavSync {
             await deriveSyncKey(credentials.passphrase);
             if (config.remember && !this.canRemember()) throw syncError('syncKeychainUnavailable');
             const stored = { config };
-            if (config.remember) stored.credentials = this.safeStorage.encryptString(JSON.stringify(credentials)).toString('base64');
+            if (config.remember) stored.credentials = (await this.safeStorage.encryptStringAsync(JSON.stringify(credentials))).toString('base64');
             await this.atomicJson('connection.json', stored);
             if (!same) {
                 this.state = { deviceId: this.state.deviceId, bases: {}, lastSync: null };
