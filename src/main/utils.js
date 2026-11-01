@@ -65,7 +65,7 @@ function parseHysteria2Link(link, tag) {
     if (pinSHA256) tlsSettings.pinnedPeerCertSha256 = pinSHA256;
     const insecure = ['1', 'true', 'yes'].includes(firstQueryValue(params, 'insecure', 'allowInsecure').toLowerCase());
     if (insecure && !pinSHA256) {
-        throw new Error('Hysteria 2 insecure TLS requires pinSHA256 with Xray v26.10.21');
+        throw new Error('Hysteria 2 insecure TLS requires pinSHA256 with Xray v26.10.31');
     }
 
     const hysteriaSettings = { version: 2 };
